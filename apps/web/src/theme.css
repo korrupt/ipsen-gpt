@@ -1,0 +1,44 @@
+/*
+ * All theming lives here. Swap colors, fonts, bubbles, background and the
+ * portrait without touching components.
+ */
+:root {
+  /* Branding */
+  --portrait-image: url('/portrait.svg');
+  --background-image: none;
+
+  /* Colors */
+  --color-bg: #212121;
+  --color-surface: #303030;
+  --color-surface-hover: #3a3a3a;
+  --color-text: #ececec;
+  --color-text-muted: #afafaf;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-accent: #ececec;
+  --color-accent-text: #0d0d0d;
+  --color-disabled: #676767;
+  --color-error: #f28b82;
+  --color-thinking: #ececec;
+
+  /* Typography */
+  --font-family: ui-sans-serif, -apple-system, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-size-base: 16px; /* >= 16px keeps iOS from zooming the input */
+  --font-size-small: 12px;
+  --line-height: 1.6;
+
+  /* Bubbles */
+  --user-bubble-bg: var(--color-surface);
+  --user-bubble-text: var(--color-text);
+  --user-bubble-radius: 22px;
+  --user-bubble-padding: 10px 16px;
+  --assistant-bubble-bg: transparent;
+  --assistant-bubble-text: var(--color-text);
+  --assistant-bubble-radius: 0;
+  --assistant-bubble-padding: 0;
+
+  /* Layout */
+  --header-height: 56px;
+  --portrait-size: 32px;
+  --content-max-width: 48rem;
+  --composer-radius: 28px;
+}

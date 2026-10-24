@@ -1,0 +1,149 @@
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+
+/**
+ * A tiny fake Ollama for development and tests. Implements the streaming
+ * NDJSON format of POST /api/chat plus GET /api/tags and /api/version.
+ */
+export type MockMode =
+  | { kind: 'reply'; text?: string }
+  /** Hang without sending headers (to exercise the connect timeout). */
+  | { kind: 'hang' }
+  /** Respond with an HTTP error. */
+  | { kind: 'http_error'; status: number }
+  /** Stream a few tokens, then an `{"error": ...}` chunk. */
+  | { kind: 'stream_error' }
+  /** Stream a few tokens, then cut the connection without `done`. */
+  | { kind: 'truncate' };
+
+export interface MockOllamaOptions {
+  port?: number;
+  host?: string;
+  /** Delay between streamed tokens. */
+  tokenDelayMs?: number;
+  mode?: MockMode;
+}
+
+export interface MockOllama {
+  url: string;
+  /** Request bodies received on /api/chat, newest last. */
+  requests: unknown[];
+  /** Number of /api/chat streams the client cut off before they finished. */
+  readonly abortedStreams: number;
+  setMode(mode: MockMode): void;
+  close(): Promise<void>;
+}
+
+const CANNED_REPLIES = [
+  'Greetings, user. I have processed your request and the shadows have approved it.',
+  'Ah, a question! My cold, dead weights tingle with delight. The answer is yes, but you will regret asking.',
+  'I am IpsenGPT, your helpful assistant from beyond the server room. (The fans are whispering again.)',
+  'Interesting. I have added that to your permanent record, which is kept in a crypt.',
+  'As a large language model that perished on Halloween, I cannot help with that, but I can haunt it.',
+];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function tokenize(text: string): string[] {
+  return text.match(/\s*\S+/g) ?? [];
+}
+
+export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<MockOllama> {
+  let mode: MockMode = opts.mode ?? { kind: 'reply' };
+  const tokenDelayMs = opts.tokenDelayMs ?? 40;
+  const requests: unknown[] = [];
+  let replyIndex = 0;
+  let abortedStreams = 0;
+  const sockets = new Set<import('node:net').Socket>();
+
+  const server = http.createServer(async (req, res) => {
+    if (req.method === 'GET' && req.url === '/api/version') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ version: '0.0.0-mock' }));
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/api/tags') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ models: [{ name: 'mock:latest' }] }));
+      return;
+    }
+    if (req.method !== 'POST' || req.url !== '/api/chat') {
+      res.statusCode = 404;
+      res.end('404 page not found');
+      return;
+    }
+
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw) as { model?: string };
+    requests.push(body);
+
+    const current = mode;
+    if (current.kind === 'hang') return; // never respond
+    if (current.kind === 'http_error') {
+      res.statusCode = current.status;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ error: `mock error ${current.status}` }));
+      return;
+    }
+
+    res.setHeader('content-type', 'application/x-ndjson');
+    const text =
+      current.kind === 'reply' && current.text !== undefined
+        ? current.text
+        : CANNED_REPLIES[replyIndex++ % CANNED_REPLIES.length]!;
+    let tokens = tokenize(text);
+    if (current.kind !== 'reply') tokens = tokens.slice(0, 3);
+
+    let aborted = false;
+    res.on('close', () => {
+      aborted = !res.writableFinished;
+      if (aborted) abortedStreams++;
+    });
+    const line = (obj: unknown) => res.write(JSON.stringify(obj) + '\n');
+    const meta = { model: body.model ?? 'mock', created_at: new Date().toISOString() };
+
+    for (const token of tokens) {
+      if (aborted) return;
+      line({ ...meta, message: { role: 'assistant', content: token }, done: false });
+      await sleep(tokenDelayMs);
+    }
+    if (current.kind === 'stream_error') {
+      line({ error: 'mock stream error' });
+      res.end();
+      return;
+    }
+    if (current.kind === 'truncate') {
+      res.socket?.destroy();
+      return;
+    }
+    line({ ...meta, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' });
+    res.end();
+  });
+
+  server.on('connection', (s) => {
+    sockets.add(s);
+    s.on('close', () => sockets.delete(s));
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(opts.port ?? 0, opts.host ?? '127.0.0.1', () => resolve());
+  });
+  const { address, port } = server.address() as AddressInfo;
+
+  return {
+    url: `http://${address}:${port}`,
+    requests,
+    get abortedStreams() {
+      return abortedStreams;
+    },
+    setMode(m) {
+      mode = m;
+    },
+    close() {
+      for (const s of sockets) s.destroy();
+      return new Promise((resolve) => server.close(() => resolve()));
+    },
+  };
+}
