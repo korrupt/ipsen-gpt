@@ -23,6 +23,9 @@ const ConfigSchema = z.object({
   OLLAMA_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.8),
   OLLAMA_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
   OLLAMA_REPLY_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+  OLLAMA_FALLBACK_URL: z.union([z.literal(''), z.url()]).default(''),
+  OLLAMA_FALLBACK_MODEL: z.string().min(1).default('llama3.2:1b'),
+  OLLAMA_PRIMARY_RETRY_MS: z.coerce.number().int().min(0).default(30000),
 
   PERSONA_PATH: z.string().default('content/persona.md'),
   CHAT_MAX_INPUT_CHARS: z.coerce.number().int().positive().default(500),
@@ -56,12 +59,17 @@ export interface Config {
   host: string;
   port: number;
   ollama: {
+    /** Primary endpoint (the PC, via the SSH tunnel in production). */
     url: string;
     model: string;
     numCtx: number;
     temperature: number;
     connectTimeoutMs: number;
     replyTimeoutMs: number;
+    /** Used when the primary fails before replying. Null = no fallback. */
+    fallback: { url: string; model: string } | null;
+    /** After the primary fails, skip it for this long before trying it again. */
+    primaryRetryMs: number;
   };
   chat: {
     personaPath: string;
@@ -134,6 +142,10 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
       temperature: e.OLLAMA_TEMPERATURE,
       connectTimeoutMs: e.OLLAMA_CONNECT_TIMEOUT_MS,
       replyTimeoutMs: e.OLLAMA_REPLY_TIMEOUT_MS,
+      fallback: e.OLLAMA_FALLBACK_URL
+        ? { url: e.OLLAMA_FALLBACK_URL.replace(/\/+$/, ''), model: e.OLLAMA_FALLBACK_MODEL }
+        : null,
+      primaryRetryMs: e.OLLAMA_PRIMARY_RETRY_MS,
     },
     chat: {
       personaPath: resolve(e.PERSONA_PATH),

@@ -33,6 +33,25 @@ export interface PersonInput {
   info: string;
 }
 
+export interface ProbeResult {
+  url: string;
+  model: string;
+  reachable: boolean;
+  hasModel: boolean;
+  error: string | null;
+}
+
+export interface SystemStatus {
+  llm: {
+    forceFallback: boolean;
+    lastUsed: 'primary' | 'fallback' | null;
+    primarySkippedUntil: number | null;
+    primary: ProbeResult;
+    fallback: ProbeResult | null;
+  };
+  errors: { at: number; message: string; detail: string }[];
+}
+
 let onUnauthorized: () => void = () => {};
 /** Called whenever the server says we're not logged in. */
 export function setUnauthorizedHandler(fn: () => void) {
@@ -78,6 +97,10 @@ export const adminApi = {
   releaseName: (id: string) =>
     call<{ session: AdminSession }>('POST', `/sessions/${id}/release-name`, {}).then((r) => r.session),
   endSession: (id: string) => call<{ ok: true }>('POST', `/sessions/${id}/end`, {}),
+
+  system: () => call<SystemStatus>('GET', '/system'),
+  setForceFallback: (enabled: boolean) =>
+    call<{ forceFallback: boolean }>('POST', '/system/force-fallback', { enabled }),
 
   people: () => call<{ people: AdminPerson[]; errors: string[] }>('GET', '/people'),
   reloadPeople: () => call<{ people: AdminPerson[]; errors: string[] }>('POST', '/people/reload', {}),

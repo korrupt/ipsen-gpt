@@ -15,11 +15,7 @@ export interface AppDeps {
   log?: (msg: string, err?: unknown) => void;
 }
 
-const defaultLog = (msg: string, err?: unknown) => {
-  console.error(`[${new Date().toISOString()}] ${msg}`, err ?? '');
-};
-
-export function createApp({ config, services, getPersona, log = defaultLog }: AppDeps) {
+export function createApp({ config, services, getPersona, log = services.log }: AppDeps) {
   const app = express();
   app.disable('x-powered-by');
   // Behind Nginx on the same host; trust only the loopback proxy for req.ip.

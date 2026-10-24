@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import { allow, clientIp, requireSession, sessionOf } from '../http.js';
-import { OllamaError, streamChat } from '../ollama.js';
+import { OllamaError } from '../ollama.js';
 import type { PeopleStore } from '../people.js';
 import { buildMessages } from '../prompt.js';
 import type { Session } from '../sessions.js';
@@ -93,7 +93,7 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
 
     let reply = '';
     try {
-      for await (const delta of streamChat(config.ollama, messages, abort.signal)) {
+      for await (const delta of services.llm.chat(messages, abort.signal)) {
         reply += delta;
         sse.send('token', { text: delta });
       }

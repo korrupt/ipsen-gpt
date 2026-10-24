@@ -155,3 +155,49 @@ describe('ago', () => {
     expect(ago(now - 2 * 3600_000 - 5, now)).toBe('2 h ago');
   });
 });
+
+describe('system', () => {
+  const probe = (over: Record<string, unknown> = {}) => ({
+    url: 'http://127.0.0.1:11435',
+    model: 'qwen3-vl:8b',
+    reachable: true,
+    hasModel: true,
+    error: null,
+    ...over,
+  });
+
+  it('shows both models, recent errors, and toggles force fallback', async () => {
+    let forced = false;
+    const status = () => ({
+      llm: {
+        forceFallback: forced,
+        lastUsed: 'fallback',
+        primarySkippedUntil: Date.now() + 20_000,
+        primary: probe({ reachable: false, hasModel: false, error: 'fetch failed' }),
+        fallback: probe({ url: 'http://127.0.0.1:11434', model: 'llama3.2:1b' }),
+      },
+      errors: [{ at: Date.now(), message: 'Primary model failed, using fallback', detail: 'Ollama unreachable' }],
+    });
+    const fetch = loggedIn({
+      'GET /api/admin/system': () => json(status()),
+      'POST /api/admin/system/force-fallback': (init) => {
+        forced = JSON.parse(init.body as string).enabled;
+        return json({ forceFallback: forced });
+      },
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^system$/i }));
+
+    const primary = await screen.findByTestId('model-primary');
+    expect(primary.textContent).toContain('Unreachable');
+    expect(primary.textContent).toContain('fetch failed');
+    expect(screen.getByTestId('model-fallback').textContent).toMatch(/Ready.*llama3\.2:1b.*answering now/);
+    expect(screen.getByText(/trying it again in 2\d s/)).toBeTruthy();
+    expect(screen.getByText('Primary model failed, using fallback')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Force fallback model' }));
+    expect(await screen.findByRole('button', { name: 'Stop forcing fallback' })).toBeTruthy();
+    const posts = fetch.mock.calls.filter(([url]) => url === '/api/admin/system/force-fallback');
+    expect(JSON.parse(posts[0]![1].body as string)).toEqual({ enabled: true });
+  });
+});

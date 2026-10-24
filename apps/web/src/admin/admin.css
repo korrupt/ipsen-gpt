@@ -358,3 +358,9 @@ textarea {
   font-weight: 600;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
+
+.admin-error-detail {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}

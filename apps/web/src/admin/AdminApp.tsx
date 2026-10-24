@@ -4,9 +4,10 @@ import { ClaimsTab } from './ClaimsTab';
 import { Login } from './Login';
 import { PeopleTab } from './PeopleTab';
 import { SessionsTab } from './SessionsTab';
+import { SystemTab } from './SystemTab';
 import { usePoll } from './usePoll';
 
-type Tab = 'claims' | 'sessions' | 'people';
+type Tab = 'claims' | 'sessions' | 'people' | 'system';
 
 export function AdminApp() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -47,6 +48,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     { id: 'claims', label: 'Claims', badge: claims?.length },
     { id: 'sessions', label: 'Sessions' },
     { id: 'people', label: 'People' },
+    { id: 'system', label: 'System' },
   ];
 
   return (
@@ -62,6 +64,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         {tab === 'claims' && <ClaimsTab claims={claims} reload={reloadClaims} toast={toast} />}
         {tab === 'sessions' && <SessionsTab toast={toast} />}
         {tab === 'people' && <PeopleTab toast={toast} />}
+        {tab === 'system' && <SystemTab toast={toast} />}
       </main>
       {toastMsg && (
         <div className="toast" role="status">

@@ -1,5 +1,11 @@
 import type { Response } from 'express';
 
+/**
+ * Routes that stream SSE. Nginx must not buffer these
+ * (deploy/droplet/nginx/ipsengpt.conf; checked by test/deploy-config.test.ts).
+ */
+export const SSE_ROUTES = ['/api/chat', '/api/events'] as const;
+
 export interface SseStream {
   send(event: string, data: unknown): void;
   close(): void;

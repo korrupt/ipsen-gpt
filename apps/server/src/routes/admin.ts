@@ -8,6 +8,7 @@ import type { Services } from '../services.js';
 
 const PasswordBody = z.object({ password: z.string().max(500) });
 const AssignBody = z.object({ slug: z.string().min(1) });
+const ToggleBody = z.object({ enabled: z.boolean() });
 const PersonBody = z.object({
   name: z.string().max(200),
   aliases: z.array(z.string().max(200)).max(50).default([]),
@@ -16,7 +17,7 @@ const PersonBody = z.object({
 
 export function adminRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { adminAuth, sessions, people, limiter } = services;
+  const { adminAuth, sessions, people, limiter, llm, settings, errors } = services;
 
   const personName = (slug: string | null) => (slug ? (people.get(slug)?.name ?? `${slug} (deleted)`) : null);
 
@@ -129,6 +130,26 @@ export function adminRouter(config: Config, services: Services): Router {
   );
 
   router.post('/sessions/:id/end', (req, res) => handle(res, () => sessions.end(req.params.id)));
+
+  // --- System ---------------------------------------------------------------
+
+  router.get('/system', async (_req, res) => {
+    res.json({ llm: await llm.status(), errors: errors.recent() });
+  });
+
+  router.post('/system/force-fallback', (req, res) => {
+    const body = ToggleBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: 'Expected { enabled: boolean }' });
+      return;
+    }
+    if (body.data.enabled && !llm.hasFallback) {
+      res.status(409).json({ error: 'No fallback model is configured (OLLAMA_FALLBACK_URL).' });
+      return;
+    }
+    settings.set('forceFallback', body.data.enabled);
+    res.json({ forceFallback: body.data.enabled });
+  });
 
   // --- People ---------------------------------------------------------------
 

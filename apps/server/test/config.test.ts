@@ -37,6 +37,14 @@ describe('parseConfig', () => {
     expect(parseConfig({ ADMIN_PASSWORD: '' }, '/base').admin.password).toBeNull();
   });
 
+  it('parses the fallback model; empty URL means no fallback', () => {
+    expect(parseConfig({}, '/').ollama.fallback).toBeNull();
+    const c = parseConfig({ OLLAMA_FALLBACK_URL: 'http://127.0.0.1:11434/', OLLAMA_PRIMARY_RETRY_MS: '0' }, '/');
+    expect(c.ollama.fallback).toEqual({ url: 'http://127.0.0.1:11434', model: 'llama3.2:1b' });
+    expect(c.ollama.primaryRetryMs).toBe(0);
+    expect(() => parseConfig({ OLLAMA_FALLBACK_URL: 'nope' }, '/')).toThrow(/OLLAMA_FALLBACK_URL/);
+  });
+
   it('rejects invalid values with a readable error', () => {
     expect(() => parseConfig({ ADMIN_PASSWORD: 'short' }, '/')).toThrow(/ADMIN_PASSWORD/);
     expect(() => parseConfig({ RATE_CHAT_IP: 'lots' }, '/')).toThrow(/RATE_CHAT_IP/);

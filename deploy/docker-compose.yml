@@ -1,0 +1,47 @@
+# Production stack on the droplet. Lives in /srv/ipsengpt/app next to .env.
+#
+# PORT RULE: never publish a port without the "127.0.0.1:" prefix. Docker's
+# iptables rules bypass ufw, so "11434:11434" would be open to the internet.
+name: ipsengpt
+
+services:
+  app:
+    image: ipsengpt:${IPSENGPT_TAG:-latest}
+    # Host networking so the app can reach the SSH tunnel on the host's
+    # 127.0.0.1:11435. The app itself binds 127.0.0.1:3000 (Nginx proxies to it).
+    network_mode: host
+    env_file: .env
+    environment:
+      HOST: 127.0.0.1
+      PORT: ${APP_PORT:-3000}
+    volumes:
+      - ${DATA_ROOT:-/srv/ipsengpt}/db:/data/db
+      - ${DATA_ROOT:-/srv/ipsengpt}/people:/data/people
+      - ${DATA_ROOT:-/srv/ipsengpt}/photos:/data/photos
+      # Persona is re-read on every message: edit it here, no restart needed.
+      - ./content:/app/content:ro
+    restart: unless-stopped
+    stop_grace_period: 5s
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+
+  # Fallback model for when the PC is unreachable. Text only (no vision).
+  ollama:
+    image: ollama/ollama:0.40.11
+    ports:
+      - "127.0.0.1:11434:11434"
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - ollama:/root/.ollama
+    mem_limit: 2g
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+
+volumes:
+  ollama:

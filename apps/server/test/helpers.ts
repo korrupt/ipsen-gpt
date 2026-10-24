@@ -51,9 +51,9 @@ export function makeEnv(overrides: Record<string, string> = {}, setup?: (config:
   const config = makeConfig(overrides);
   setup?.(config);
   let now = 1_700_000_000_000;
-  const services = createServices(config, () => now);
   const logged: string[] = [];
-  const app = createApp({ config, services, log: (msg) => logged.push(msg) });
+  const services = createServices(config, { now: () => now, write: (msg) => logged.push(msg) });
+  const app = createApp({ config, services });
   return { config, services, app, logged, tick: (ms) => (now += ms) };
 }
 
