@@ -29,3 +29,28 @@ export function mockFetch(impl: (url: string, init: RequestInit) => Promise<Resp
   vi.stubGlobal('fetch', fn);
   return fn;
 }
+
+type Handler = (init: RequestInit, url: string) => Response | Promise<Response>;
+
+/**
+ * Routes fetch calls by "METHOD /path" to handlers, like a tiny fake server.
+ * Unrouted calls fail the test loudly.
+ */
+export function fakeServer(routes: Record<string, Handler>) {
+  return mockFetch(async (url, init) => {
+    const key = `${init?.method ?? 'GET'} ${url.split('?')[0]}`;
+    const handler = routes[key];
+    if (!handler) throw new Error(`Unrouted fetch: ${key}`);
+    return handler(init ?? {}, url);
+  });
+}
+
+export const json = (body: unknown, status = 200) => Response.json(body, { status });
+
+export const guestSession = (over: Record<string, unknown> = {}) => ({
+  name: 'Kari',
+  state: 'guest',
+  claimCode: null,
+  notice: null,
+  ...over,
+});

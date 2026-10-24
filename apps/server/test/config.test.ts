@@ -24,7 +24,22 @@ describe('parseConfig', () => {
     expect(c.ollama.url).toBe('http://127.0.0.1:11435');
   });
 
+  it('parses rate limits, booleans and admin settings', () => {
+    const c = parseConfig(
+      { RATE_CHAT_SESSION: '3/10', ADMIN_COOKIE_SECURE: 'false', ADMIN_PASSWORD: 'longenough', DB_PATH: ':memory:' },
+      '/base',
+    );
+    expect(c.rateLimits.chatPerSession).toEqual({ count: 3, windowMs: 10_000 });
+    expect(c.rateLimits.chatPerIp).toEqual({ count: 120, windowMs: 60_000 });
+    expect(c.admin).toMatchObject({ password: 'longenough', cookieSecure: false });
+    expect(c.dbPath).toBe(':memory:');
+    expect(parseConfig({}, '/base').admin).toMatchObject({ password: null, cookieSecure: true });
+    expect(parseConfig({ ADMIN_PASSWORD: '' }, '/base').admin.password).toBeNull();
+  });
+
   it('rejects invalid values with a readable error', () => {
+    expect(() => parseConfig({ ADMIN_PASSWORD: 'short' }, '/')).toThrow(/ADMIN_PASSWORD/);
+    expect(() => parseConfig({ RATE_CHAT_IP: 'lots' }, '/')).toThrow(/RATE_CHAT_IP/);
     expect(() => parseConfig({ PORT: 'abc' }, '/')).toThrow(/PORT/);
     expect(() => parseConfig({ OLLAMA_URL: 'not a url' }, '/')).toThrow(/OLLAMA_URL/);
   });

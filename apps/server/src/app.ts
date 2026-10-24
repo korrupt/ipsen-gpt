@@ -3,10 +3,14 @@ import path from 'node:path';
 import express from 'express';
 import type { Config } from './config.js';
 import { loadPersona } from './prompt.js';
+import { adminRouter } from './routes/admin.js';
 import { chatRouter } from './routes/chat.js';
+import { sessionRouter } from './routes/session.js';
+import type { Services } from './services.js';
 
 export interface AppDeps {
   config: Config;
+  services: Services;
   getPersona?: () => string;
   log?: (msg: string, err?: unknown) => void;
 }
@@ -15,7 +19,7 @@ const defaultLog = (msg: string, err?: unknown) => {
   console.error(`[${new Date().toISOString()}] ${msg}`, err ?? '');
 };
 
-export function createApp({ config, getPersona, log = defaultLog }: AppDeps) {
+export function createApp({ config, services, getPersona, log = defaultLog }: AppDeps) {
   const app = express();
   app.disable('x-powered-by');
   // Behind Nginx on the same host; trust only the loopback proxy for req.ip.
@@ -26,14 +30,17 @@ export function createApp({ config, getPersona, log = defaultLog }: AppDeps) {
   api.get('/health', (_req, res) => {
     res.json({ ok: true });
   });
+  api.use(sessionRouter(config, services.sessions, services.limiter));
   api.use(
     chatRouter({
       config,
+      services,
       // Re-read on every request so persona edits apply without a restart.
       getPersona: getPersona ?? (() => loadPersona(config.chat.personaPath)),
       log,
     }),
   );
+  api.use('/admin', adminRouter(config, services));
   api.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });
@@ -46,10 +53,18 @@ export function createApp({ config, getPersona, log = defaultLog }: AppDeps) {
 
   // Built frontend (production). In dev, Vite serves it and proxies /api here.
   const indexHtml = path.join(config.webDist, 'index.html');
+  const adminHtml = path.join(config.webDist, 'admin', 'index.html');
   if (fs.existsSync(indexHtml)) {
+    const sendPage = (file: string) => (_req: express.Request, res: express.Response) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(file);
+    };
+    // Non-strict routing would also match '/admin/' here, so check the exact path to avoid a loop.
+    app.get('/admin', (req, res, next) => (req.path === '/admin' ? res.redirect(301, '/admin/') : next()));
     app.use(
       express.static(config.webDist, {
         index: false,
+        redirect: false,
         setHeaders(res, filePath) {
           // Vite's hashed bundles never change; everything else (portrait, favicon) must revalidate
           // so swapping a theme asset shows up immediately.
@@ -58,10 +73,8 @@ export function createApp({ config, getPersona, log = defaultLog }: AppDeps) {
         },
       }),
     );
-    app.get('/{*splat}', (_req, res) => {
-      res.setHeader('Cache-Control', 'no-cache');
-      res.sendFile(indexHtml);
-    });
+    if (fs.existsSync(adminHtml)) app.get('/admin/{*splat}', sendPage(adminHtml));
+    app.get('/{*splat}', sendPage(indexHtml));
   }
 
   return app;

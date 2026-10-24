@@ -19,6 +19,8 @@
   --color-disabled: #676767;
   --color-error: #f28b82;
   --color-thinking: #ececec;
+  --color-claim-bg: #3b2a12;
+  --color-claim-text: #ffd27a;
 
   /* Typography */
   --font-family: ui-sans-serif, -apple-system, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

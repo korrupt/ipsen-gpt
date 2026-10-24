@@ -1,43 +1,28 @@
+import { ApiError, authHeaders, checkResponse, NETWORK_ERROR } from './session';
 import { SseParser } from './sse';
-
-export interface HistoryItem {
-  role: 'user' | 'assistant';
-  content: string;
-}
 
 export const MAX_INPUT_CHARS = 500;
 
-export class ChatError extends Error {}
-
-const NETWORK_ERROR = 'The spirits could not reach the server. Check your connection and try again.';
-
 /**
- * Sends a message and streams the reply. Resolves when the reply is complete;
- * rejects with ChatError on server or network failure, or AbortError if aborted.
+ * Sends a message and streams the reply. Resolves when the reply is complete.
+ * Rejects with SessionGoneError (401), ApiError (other failures) or an
+ * AbortError if aborted.
  */
-export async function sendChat(
-  message: string,
-  history: HistoryItem[],
-  onToken: (text: string) => void,
-  signal?: AbortSignal,
-): Promise<void> {
+export async function sendChat(message: string, onToken: (text: string) => void, signal?: AbortSignal): Promise<void> {
   let res: Response;
   try {
     res = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
-      body: JSON.stringify({ message, history }),
+      headers: { ...authHeaders(), 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify({ message }),
       signal,
     });
   } catch (err) {
     if (signal?.aborted) throw err;
-    throw new ChatError(NETWORK_ERROR);
+    throw new ApiError(NETWORK_ERROR, 0);
   }
-
-  if (!res.ok || !res.body) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new ChatError(body?.error ?? NETWORK_ERROR);
-  }
+  await checkResponse(res);
+  if (!res.body) throw new ApiError(NETWORK_ERROR, 0);
 
   let finished = false;
   let failure: string | null = null;
@@ -58,13 +43,13 @@ export async function sendChat(
     }
   } catch (err) {
     if (signal?.aborted) throw err;
-    throw new ChatError(NETWORK_ERROR);
+    throw new ApiError(NETWORK_ERROR, 0);
   } finally {
     signal?.removeEventListener('abort', cancel);
   }
   signal?.throwIfAborted();
   parser.push('\n\n');
 
-  if (failure) throw new ChatError(failure);
-  if (!finished) throw new ChatError(NETWORK_ERROR);
+  if (failure) throw new ApiError(failure, 200);
+  if (!finished) throw new ApiError(NETWORK_ERROR, 0);
 }

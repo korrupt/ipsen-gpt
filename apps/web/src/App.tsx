@@ -1,31 +1,98 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ClaimBanner } from './components/ClaimBanner';
 import { Composer } from './components/Composer';
 import { Header } from './components/Header';
 import { MessageList, type Message } from './components/MessageList';
+import { NamePicker } from './components/NamePicker';
 import { useVisualViewport } from './hooks/useVisualViewport';
-import { ChatError, sendChat, type HistoryItem } from './lib/chatApi';
+import { sendChat } from './lib/chatApi';
+import {
+  ApiError,
+  chooseName,
+  createSession,
+  fetchSession,
+  getToken,
+  SessionGoneError,
+  type HistoryItem,
+  type SessionView,
+} from './lib/session';
+
+export const SESSION_ENDED_NOTICE = 'Your session has ended. Pick a name to start again.';
+export const CLAIM_POLL_MS = 5000;
 
 let nextId = 0;
 const newId = () => `m${++nextId}`;
+const fromHistory = (items: HistoryItem[]): Message[] =>
+  items.map((m) => ({ id: newId(), role: m.role, content: m.content, status: 'done' }));
 
-/** What we send as context: finished exchanges only, no failed replies. */
-function toHistory(messages: Message[]): HistoryItem[] {
-  const out: HistoryItem[] = [];
-  for (const m of messages) {
-    if (m.role === 'assistant' && (m.status === 'error' || !m.content)) {
-      if (out.at(-1)?.role === 'user') out.pop();
-      continue;
-    }
-    out.push({ role: m.role, content: m.content });
-  }
-  return out;
-}
+type Screen =
+  | { kind: 'loading' }
+  | { kind: 'offline' }
+  /** `existing`: the session exists but has no name (claim rejected / name released). */
+  | { kind: 'name'; notice: string | null; existing: boolean }
+  | { kind: 'chat' };
 
 export function App() {
   useVisualViewport();
+  const [screen, setScreen] = useState<Screen>(() => (getToken() ? { kind: 'loading' } : { kind: 'name', notice: null, existing: false }));
+  const [session, setSession] = useState<SessionView | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  /** Applies a fresh session view from the server and picks the right screen. */
+  const applySession = useCallback((s: SessionView) => {
+    setSession(s);
+    setScreen(s.name === null ? { kind: 'name', notice: s.notice, existing: true } : { kind: 'chat' });
+  }, []);
+
+  const sessionGone = useCallback(() => {
+    setSession(null);
+    setMessages([]);
+    setScreen({ kind: 'name', notice: SESSION_ENDED_NOTICE, existing: false });
+  }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const { session: s, messages: history } = await fetchSession();
+      setMessages(fromHistory(history));
+      applySession(s);
+    } catch (err) {
+      if (err instanceof SessionGoneError) setScreen({ kind: 'name', notice: null, existing: false });
+      else setScreen({ kind: 'offline' });
+    }
+  }, [applySession]);
+
+  useEffect(() => {
+    if (getToken()) void load();
+  }, [load]);
+
+  // While a claim is pending, check for approval/rejection. (Phase 5 replaces this with live events.)
+  useEffect(() => {
+    if (session?.state !== 'pending_claim') return;
+    const timer = setInterval(async () => {
+      try {
+        applySession((await fetchSession()).session);
+      } catch (err) {
+        if (err instanceof SessionGoneError) sessionGone();
+      }
+    }, CLAIM_POLL_MS);
+    return () => clearInterval(timer);
+  }, [session?.state, applySession, sessionGone]);
+
+  const pickName = async (name: string): Promise<string | null> => {
+    try {
+      const existing = screen.kind === 'name' && screen.existing;
+      applySession(existing ? await chooseName(name) : await createSession(name));
+      return null;
+    } catch (err) {
+      if (err instanceof SessionGoneError) {
+        setScreen({ kind: 'name', notice: null, existing: false });
+        return 'Your old session ended. Try again.';
+      }
+      return err instanceof ApiError ? err.message : 'Something went wrong. Try again.';
+    }
+  };
 
   const patchLast = (patch: (m: Message) => Partial<Message>) =>
     setMessages((ms) => {
@@ -33,34 +100,39 @@ export function App() {
       return last ? [...ms.slice(0, -1), { ...last, ...patch(last) }] : ms;
     });
 
-  const send = useCallback(async (text: string, prior: Message[]) => {
-    const history = toHistory(prior);
-    setMessages([
-      ...prior,
-      { id: newId(), role: 'user', content: text, status: 'done' },
-      { id: newId(), role: 'assistant', content: '', status: 'streaming' },
-    ]);
-    setStreaming(true);
-    const abort = new AbortController();
-    abortRef.current = abort;
-    try {
-      await sendChat(text, history, (t) => patchLast((m) => ({ content: m.content + t })), abort.signal);
-      patchLast(() => ({ status: 'done' }));
-    } catch (err) {
-      if (abort.signal.aborted) {
-        patchLast((m) => ({ status: 'stopped', content: m.content }));
-      } else {
-        const message = err instanceof ChatError ? err.message : 'Something went wrong. Try again.';
-        patchLast(() => ({ status: 'error', content: message }));
+  const send = useCallback(
+    async (text: string, prior: Message[]) => {
+      setMessages([
+        ...prior,
+        { id: newId(), role: 'user', content: text, status: 'done' },
+        { id: newId(), role: 'assistant', content: '', status: 'streaming' },
+      ]);
+      setStreaming(true);
+      const abort = new AbortController();
+      abortRef.current = abort;
+      try {
+        await sendChat(text, (t) => patchLast((m) => ({ content: m.content + t })), abort.signal);
+        patchLast(() => ({ status: 'done' }));
+      } catch (err) {
+        if (abort.signal.aborted) {
+          patchLast(() => ({ status: 'stopped' }));
+        } else if (err instanceof SessionGoneError) {
+          sessionGone();
+        } else if (err instanceof ApiError && err.code === 'name_required') {
+          void load();
+        } else {
+          const message = err instanceof ApiError ? err.message : 'Something went wrong. Try again.';
+          patchLast(() => ({ status: 'error', content: message }));
+        }
+      } finally {
+        abortRef.current = null;
+        setStreaming(false);
       }
-    } finally {
-      abortRef.current = null;
-      setStreaming(false);
-    }
-  }, []);
+    },
+    [load, sessionGone],
+  );
 
   const onSend = (text: string) => void send(text, messages);
-
   const onStop = () => abortRef.current?.abort();
 
   // Drop the failed reply and its question, then ask again.
@@ -72,9 +144,26 @@ export function App() {
 
   return (
     <div className="app">
-      <Header thinking={streaming} />
-      <MessageList messages={messages} onRetry={onRetry} />
-      <Composer streaming={streaming} onSend={onSend} onStop={onStop} />
+      <Header thinking={streaming} name={screen.kind === 'chat' ? session?.name : null} />
+      {screen.kind === 'loading' && <main className="messages" aria-busy="true" />}
+      {screen.kind === 'offline' && (
+        <main className="messages">
+          <div className="empty">
+            <p>The spirits could not reach the server.</p>
+            <button type="button" className="link-button" onClick={() => void load()}>
+              Try again
+            </button>
+          </div>
+        </main>
+      )}
+      {screen.kind === 'name' && <NamePicker notice={screen.notice} onSubmit={pickName} />}
+      {screen.kind === 'chat' && (
+        <>
+          {session?.state === 'pending_claim' && session.claimCode && <ClaimBanner code={session.claimCode} />}
+          <MessageList messages={messages} onRetry={onRetry} />
+          <Composer streaming={streaming} onSend={onSend} onStop={onStop} />
+        </>
+      )}
     </div>
   );
 }

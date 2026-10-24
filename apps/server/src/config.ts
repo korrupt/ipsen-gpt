@@ -2,6 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
+/** "count/seconds", e.g. "8/60" = 8 requests per 60 s. */
+const RateLimit = z
+  .string()
+  .regex(/^\d+\/\d+$/, 'expected "count/seconds", e.g. "8/60"')
+  .transform((v) => {
+    const [count, seconds] = v.split('/').map(Number) as [number, number];
+    return { count, windowMs: seconds * 1000 };
+  });
+
+const Bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
+
 const ConfigSchema = z.object({
   HOST: z.string().default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -19,7 +30,27 @@ const ConfigSchema = z.object({
   SSE_HEARTBEAT_MS: z.coerce.number().int().positive().default(20000),
 
   WEB_DIST: z.string().default('apps/web/dist'),
+
+  DB_PATH: z.string().default('data/ipsengpt.sqlite'),
+  PEOPLE_DIR: z.string().default('data/people'),
+
+  ADMIN_PASSWORD: z
+    .string()
+    .refine((v) => v === '' || v.length >= 8, 'must be at least 8 characters')
+    .optional(),
+  ADMIN_COOKIE_SECURE: Bool.default(true),
+  ADMIN_SESSION_HOURS: z.coerce.number().positive().default(24),
+
+  RATE_CHAT_SESSION: RateLimit.prefault('8/60'),
+  RATE_CHAT_IP: RateLimit.prefault('120/60'),
+  RATE_SESSION_CREATE_IP: RateLimit.prefault('30/600'),
+  RATE_ADMIN_LOGIN_IP: RateLimit.prefault('5/900'),
 });
+
+export interface RateLimitRule {
+  count: number;
+  windowMs: number;
+}
 
 export interface Config {
   host: string;
@@ -39,6 +70,21 @@ export interface Config {
   };
   sseHeartbeatMs: number;
   webDist: string;
+  /** SQLite file, or ':memory:'. */
+  dbPath: string;
+  peopleDir: string;
+  admin: {
+    /** Admin is disabled when unset. */
+    password: string | null;
+    cookieSecure: boolean;
+    sessionTtlMs: number;
+  };
+  rateLimits: {
+    chatPerSession: RateLimitRule;
+    chatPerIp: RateLimitRule;
+    sessionCreatePerIp: RateLimitRule;
+    adminLoginPerIp: RateLimitRule;
+  };
 }
 
 /** Walk up from `start` looking for a file; returns its directory or null. */
@@ -96,5 +142,18 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
     },
     sseHeartbeatMs: e.SSE_HEARTBEAT_MS,
     webDist: resolve(e.WEB_DIST),
+    dbPath: e.DB_PATH === ':memory:' ? e.DB_PATH : resolve(e.DB_PATH),
+    peopleDir: resolve(e.PEOPLE_DIR),
+    admin: {
+      password: e.ADMIN_PASSWORD || null,
+      cookieSecure: e.ADMIN_COOKIE_SECURE,
+      sessionTtlMs: e.ADMIN_SESSION_HOURS * 3600_000,
+    },
+    rateLimits: {
+      chatPerSession: e.RATE_CHAT_SESSION,
+      chatPerIp: e.RATE_CHAT_IP,
+      sessionCreatePerIp: e.RATE_SESSION_CREATE_IP,
+      adminLoginPerIp: e.RATE_ADMIN_LOGIN_IP,
+    },
   };
 }
