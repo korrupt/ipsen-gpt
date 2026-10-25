@@ -2,13 +2,19 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { Config } from '../config.js';
 import { allow, clientIp, requireSession, sessionOf, sessionView } from '../http.js';
-import { NameError, type SessionStore } from '../sessions.js';
-import type { RateLimiter } from '../rateLimit.js';
+import { gateView } from '../gates.js';
+import { NameError } from '../sessions.js';
+import type { Services } from '../services.js';
 
 const NameBody = z.object({ name: z.string().max(200) });
 
-export function sessionRouter(config: Config, sessions: SessionStore, limiter: RateLimiter): Router {
+export function sessionRouter(config: Config, { sessions, gates, limiter }: Services): Router {
   const router = Router();
+  /** The gate the guest must pass before chatting, if any. */
+  const currentGate = (sessionId: string) => {
+    const g = gates.current(sessionId);
+    return g ? gateView(g) : null;
+  };
 
   const nameError = (res: import('express').Response, err: unknown) => {
     if (!(err instanceof NameError)) throw err;
@@ -24,7 +30,8 @@ export function sessionRouter(config: Config, sessions: SessionStore, limiter: R
     if (!allow(limiter, res, `session:ip:${clientIp(req)}`, config.rateLimits.sessionCreatePerIp)) return;
     try {
       const { token, session } = sessions.create(body.data.name);
-      res.status(201).json({ token, session: sessionView(session) });
+      gates.sessionStarted(session.id);
+      res.status(201).json({ token, session: sessionView(session), gate: currentGate(session.id) });
     } catch (err) {
       nameError(res, err);
     }
@@ -34,6 +41,7 @@ export function sessionRouter(config: Config, sessions: SessionStore, limiter: R
     const s = sessionOf(res);
     res.json({
       session: sessionView(s),
+      gate: currentGate(s.id),
       messages: sessions.recentMessages(s.id, 200).map(({ role, content }) => ({ role, content })),
     });
   });

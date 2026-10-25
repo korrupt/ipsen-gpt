@@ -1,14 +1,31 @@
 import { Router, type Response } from 'express';
 import { z } from 'zod';
 import type { Config } from '../config.js';
+import type { GateDef } from '../gateDefs.js';
+import { GateError, type Gate } from '../gates.js';
 import { allow, clientIp } from '../http.js';
 import { PeopleError, type Person } from '../people.js';
+import type { PhotoAttempt } from '../photos.js';
 import { SessionError, type Session } from '../sessions.js';
 import type { Services } from '../services.js';
 
 const PasswordBody = z.object({ password: z.string().max(500) });
 const AssignBody = z.object({ slug: z.string().min(1) });
 const ToggleBody = z.object({ enabled: z.boolean() });
+const ForceBody = z
+  .object({
+    /** One session, or every live session with a name. */
+    sessionId: z.string().min(1).optional(),
+    all: z.literal(true).optional(),
+    /** A gate definition, or a one-off typed in by the admin. */
+    key: z.string().min(1).optional(),
+    custom: z
+      .object({ target: z.string().trim().min(1).max(200), guestPrompt: z.string().trim().min(1).max(1000) })
+      .optional(),
+    deadlineMinutes: z.number().positive().max(24 * 60).optional(),
+  })
+  .refine((b) => !!b.sessionId !== !!b.all, 'Pick one session or everyone')
+  .refine((b) => !!b.key !== !!b.custom, 'Pick a gate or describe a custom one');
 const PersonBody = z.object({
   name: z.string().max(200),
   aliases: z.array(z.string().max(200)).max(50).default([]),
@@ -17,7 +34,7 @@ const PersonBody = z.object({
 
 export function adminRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { adminAuth, sessions, people, limiter, llm, settings, errors } = services;
+  const { adminAuth, sessions, people, limiter, llm, settings, errors, gates, gateDefs, photos } = services;
 
   const personName = (slug: string | null) => (slug ? (people.get(slug)?.name ?? `${slug} (deleted)`) : null);
 
@@ -42,13 +59,63 @@ export function adminRouter(config: Config, services: Services): Router {
     })(),
   });
 
+  const sessionName = (id: string) => sessions.get(id)?.name ?? null;
+
+  const defView = (d: GateDef) => ({
+    key: d.key,
+    id: d.id,
+    person: d.personSlug ? { slug: d.personSlug, name: personName(d.personSlug) } : null,
+    target: d.target,
+    guestPrompt: d.guestPrompt,
+    refusalLines: d.refusalLines,
+    points: d.points,
+    trigger: d.trigger,
+  });
+
+  const gateSummary = (g: Gate & { sessionName?: string | null }) => ({
+    id: g.id,
+    sessionId: g.sessionId,
+    sessionName: g.sessionName !== undefined ? g.sessionName : sessionName(g.sessionId),
+    defKey: g.defKey,
+    source: g.source,
+    target: g.target,
+    guestPrompt: g.guestPrompt,
+    points: g.points,
+    status: g.status,
+    refusals: g.refusals,
+    createdAt: g.createdAt,
+    deadlineAt: g.deadlineAt,
+    resolvedAt: g.resolvedAt,
+  });
+
+  const photoView = (p: PhotoAttempt & { sessionName?: string | null }) => ({
+    id: p.id,
+    sessionId: p.sessionId,
+    sessionName: p.sessionName !== undefined ? p.sessionName : sessionName(p.sessionId),
+    gateId: p.gateId,
+    target: p.target,
+    status: p.status,
+    containsTarget: p.containsTarget,
+    confidence: p.confidence,
+    reason: p.reason,
+    error: p.error,
+    hasResized: !!p.resizedFile,
+    hasOriginal: !!p.originalFile,
+    originalMime: p.originalMime,
+    originalBytes: p.originalBytes,
+    /** False: stored as uploaded (e.g. HEIC), so EXIF/GPS may still be in it. */
+    originalProcessed: p.originalProcessed,
+    consentAt: p.consentAt,
+    createdAt: p.createdAt,
+  });
+
   /** Maps store errors to 4xx; anything else is a real 500. */
   const handle = (res: Response, fn: () => unknown) => {
     try {
       const result = fn();
       res.json(result ?? { ok: true });
     } catch (err) {
-      if (err instanceof SessionError || err instanceof PeopleError) {
+      if (err instanceof SessionError || err instanceof PeopleError || err instanceof GateError) {
         res.status(err.status).json({ error: err.message });
         return;
       }
@@ -94,7 +161,11 @@ export function adminRouter(config: Config, services: Services): Router {
   });
 
   router.post('/claims/:id/approve', (req, res) =>
-    handle(res, () => ({ session: sessionSummary(sessions.approveClaim(req.params.id)) })),
+    handle(res, () => {
+      const s = sessions.approveClaim(req.params.id);
+      gates.personAttached(s.id, s.personSlug!);
+      return { session: sessionSummary(s) };
+    }),
   );
 
   router.post('/claims/:id/reject', (req, res) =>
@@ -113,7 +184,12 @@ export function adminRouter(config: Config, services: Services): Router {
       res.status(404).json({ error: 'Session not found' });
       return;
     }
-    res.json({ session: sessionSummary(s), messages: sessions.recentMessages(s.id, 1000) });
+    res.json({
+      session: sessionSummary(s),
+      messages: sessions.recentMessages(s.id, 1000),
+      gates: gates.forSession(s.id).map((g) => gateSummary(g)),
+      photos: photos.forSession(s.id).map((p) => photoView(p)),
+    });
   });
 
   router.post('/sessions/:id/assign', (req, res) => {
@@ -122,7 +198,11 @@ export function adminRouter(config: Config, services: Services): Router {
       res.status(400).json({ error: 'Pick a person' });
       return;
     }
-    handle(res, () => ({ session: sessionSummary(sessions.assignPerson(req.params.id, body.data.slug)) }));
+    handle(res, () => {
+      const s = sessions.assignPerson(req.params.id, body.data.slug);
+      gates.personAttached(s.id, s.personSlug!);
+      return { session: sessionSummary(s) };
+    });
   });
 
   router.post('/sessions/:id/release-name', (req, res) =>
@@ -130,6 +210,72 @@ export function adminRouter(config: Config, services: Services): Router {
   );
 
   router.post('/sessions/:id/end', (req, res) => handle(res, () => sessions.end(req.params.id)));
+
+  // --- Gates ----------------------------------------------------------------
+
+  router.get('/gates', (_req, res) => {
+    const { defs, errors: defErrors } = gateDefs();
+    res.json({ definitions: defs.map(defView), errors: defErrors, active: gates.activeGates().map(gateSummary) });
+  });
+
+  router.post('/gates/force', (req, res) => {
+    const body = ForceBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: body.error.issues[0]?.message ?? 'Invalid request' });
+      return;
+    }
+    const b = body.data;
+    let spec: Parameters<typeof gates.force>[1];
+    if (b.key) {
+      const def = gateDefs().defs.find((d) => d.key === b.key);
+      if (!def) {
+        res.status(404).json({ error: 'No such gate. Was gates.json edited?' });
+        return;
+      }
+      spec = { def };
+    } else {
+      spec = { custom: b.custom! };
+    }
+    if (b.sessionId && !sessions.get(b.sessionId)) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    const ids = b.all ? sessions.liveNamedIds() : [b.sessionId!];
+    const created = gates.force(ids, spec, b.deadlineMinutes ? b.deadlineMinutes * 60_000 : null);
+    res.json({ count: created.length });
+  });
+
+  router.post('/gates/:id/cancel', (req, res) => handle(res, () => ({ gate: gateSummary(gates.cancel(req.params.id)) })));
+
+  // --- Photos ---------------------------------------------------------------
+
+  router.get('/photos', (_req, res) => {
+    res.json({ photos: photos.list().map((p) => photoView(p)) });
+  });
+
+  router.get('/photos/:id/:kind', (req, res) => {
+    const p = photos.get(req.params.id);
+    const kind = req.params.kind;
+    const file = p && (kind === 'resized' ? p.resizedFile : kind === 'original' ? p.originalFile : null);
+    const abs = photos.filePath(file ?? null);
+    if (!p || !abs) {
+      res.status(404).json({ error: 'Photo not found' });
+      return;
+    }
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.type(kind === 'original' && p.originalMime ? p.originalMime : 'image/jpeg');
+    if (req.query.download === '1') res.attachment(`${p.id}${abs.slice(abs.lastIndexOf('.'))}`);
+    res.sendFile(abs);
+  });
+
+  router.delete('/photos/:id', (req, res) => {
+    if (!photos.delete(req.params.id)) {
+      res.status(404).json({ error: 'Photo not found' });
+      return;
+    }
+    res.json({ ok: true });
+  });
 
   // --- System ---------------------------------------------------------------
 

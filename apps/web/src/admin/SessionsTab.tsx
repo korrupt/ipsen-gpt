@@ -1,5 +1,17 @@
 import { useEffect, useState } from 'react';
-import { adminApi, ago, STATE_LABELS, type AdminMessage, type AdminPerson, type AdminSession } from './api';
+import {
+  adminApi,
+  ago,
+  STATE_LABELS,
+  type AdminGate,
+  type AdminMessage,
+  type AdminPerson,
+  type AdminPhoto,
+  type AdminSession,
+  type GateDefinition,
+} from './api';
+import { ForceGateForm, GateCard } from './GatesTab';
+import { PhotoDetail, PhotoGrid } from './PhotosTab';
 import { usePoll } from './usePoll';
 
 interface Props {
@@ -62,6 +74,10 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
   const [session, setSession] = useState<AdminSession | null>(null);
   const [messages, setMessages] = useState<AdminMessage[]>([]);
   const [people, setPeople] = useState<AdminPerson[]>([]);
+  const [gates, setGates] = useState<AdminGate[]>([]);
+  const [photos, setPhotos] = useState<AdminPhoto[]>([]);
+  const [definitions, setDefinitions] = useState<GateDefinition[]>([]);
+  const [openPhoto, setOpenPhoto] = useState<AdminPhoto | null>(null);
   const [slug, setSlug] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -70,6 +86,8 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
       const r = await adminApi.session(id);
       setSession(r.session);
       setMessages(r.messages);
+      setGates(r.gates);
+      setPhotos(r.photos);
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed');
       onBack();
@@ -79,6 +97,7 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
   useEffect(() => {
     void load();
     void adminApi.people().then((r) => setPeople(r.people), () => {});
+    void adminApi.gates().then((r) => setDefinitions(r.definitions), () => {});
   }, [id]);
 
   const run = async (label: string, fn: () => Promise<unknown>, after: 'reload' | 'back' = 'reload') => {
@@ -96,6 +115,19 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
   };
 
   if (!session) return <p className="admin-muted admin-tab">Loading…</p>;
+  if (openPhoto) {
+    return (
+      <PhotoDetail
+        photo={openPhoto}
+        toast={toast}
+        onBack={() => setOpenPhoto(null)}
+        onDeleted={() => {
+          setOpenPhoto(null);
+          void load();
+        }}
+      />
+    );
+  }
 
   return (
     <section className="admin-tab">
@@ -162,6 +194,27 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
           End session
         </button>
       </div>
+
+      <h3 className="admin-h3">Gates ({gates.length})</h3>
+      <ForceGateForm definitions={definitions} sessionId={session.id} toast={toast} onDone={() => void load()} />
+      <ul className="admin-list">
+        {gates.map((g) => (
+          <li key={g.id}>
+            <GateCard
+              gate={g}
+              showName={false}
+              onCancel={() => void run('Gate cancelled', () => adminApi.cancelGate(g.id))}
+            />
+          </li>
+        ))}
+      </ul>
+
+      {photos.length > 0 && (
+        <>
+          <h3 className="admin-h3">Photos ({photos.length})</h3>
+          <PhotoGrid photos={photos} onOpen={setOpenPhoto} />
+        </>
+      )}
 
       <h3 className="admin-h3">Chat ({messages.length})</h3>
       <ol className="admin-chat">

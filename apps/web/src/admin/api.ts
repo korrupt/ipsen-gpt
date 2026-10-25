@@ -52,6 +52,74 @@ export interface SystemStatus {
   errors: { at: number; message: string; detail: string }[];
 }
 
+export type GateTrigger =
+  | { type: 'session_start' }
+  | { type: 'after_messages'; count: number }
+  | { type: 'curse_break' }
+  | { type: 'secret_level'; level: number }
+  | { type: 'admin_forced' }
+  | { type: 'timed_global'; at: string; deadline_minutes: number };
+
+export interface GateDefinition {
+  key: string;
+  id: string;
+  person: { slug: string; name: string } | null;
+  target: string;
+  guestPrompt: string;
+  refusalLines: string[];
+  points: number;
+  trigger: GateTrigger;
+}
+
+export type GateStatus = 'active' | 'passed' | 'expired' | 'cancelled';
+
+export interface AdminGate {
+  id: string;
+  sessionId: string;
+  sessionName: string | null;
+  defKey: string | null;
+  source: 'session_start' | 'after_messages' | 'admin_forced' | 'timed_global';
+  target: string;
+  guestPrompt: string;
+  points: number;
+  status: GateStatus;
+  refusals: number;
+  createdAt: number;
+  deadlineAt: number | null;
+  resolvedAt: number | null;
+}
+
+export type PhotoStatus = 'verifying' | 'passed' | 'failed' | 'unverified';
+
+export interface AdminPhoto {
+  id: string;
+  sessionId: string;
+  sessionName: string | null;
+  gateId: string | null;
+  target: string;
+  status: PhotoStatus;
+  containsTarget: boolean | null;
+  confidence: number | null;
+  reason: string | null;
+  error: string | null;
+  hasResized: boolean;
+  hasOriginal: boolean;
+  originalMime: string | null;
+  originalBytes: number | null;
+  /** False: stored as uploaded (e.g. HEIC); EXIF/GPS may still be in it. */
+  originalProcessed: boolean | null;
+  consentAt: number;
+  createdAt: number;
+}
+
+export interface ForceGateInput {
+  sessionId?: string;
+  all?: true;
+  key?: string;
+  custom?: { target: string; guestPrompt: string };
+  deadlineMinutes?: number;
+}
+
 let onUnauthorized: () => void = () => {};
 /** Called whenever the server says we're not logged in. */
 export function setUnauthorizedHandler(fn: () => void) {
@@ -91,7 +159,11 @@ export const adminApi = {
   reject: (id: string) => call<{ session: AdminSession }>('POST', `/claims/${id}/reject`, {}).then((r) => r.session),
 
   sessions: () => call<{ sessions: AdminSession[] }>('GET', '/sessions').then((r) => r.sessions),
-  session: (id: string) => call<{ session: AdminSession; messages: AdminMessage[] }>('GET', `/sessions/${id}`),
+  session: (id: string) =>
+    call<{ session: AdminSession; messages: AdminMessage[]; gates: AdminGate[]; photos: AdminPhoto[] }>(
+      'GET',
+      `/sessions/${id}`,
+    ),
   assign: (id: string, slug: string) =>
     call<{ session: AdminSession }>('POST', `/sessions/${id}/assign`, { slug }).then((r) => r.session),
   releaseName: (id: string) =>
@@ -101,6 +173,13 @@ export const adminApi = {
   system: () => call<SystemStatus>('GET', '/system'),
   setForceFallback: (enabled: boolean) =>
     call<{ forceFallback: boolean }>('POST', '/system/force-fallback', { enabled }),
+
+  gates: () => call<{ definitions: GateDefinition[]; errors: string[]; active: AdminGate[] }>('GET', '/gates'),
+  forceGate: (input: ForceGateInput) => call<{ count: number }>('POST', '/gates/force', input),
+  cancelGate: (id: string) => call<{ gate: AdminGate }>('POST', `/gates/${id}/cancel`, {}),
+
+  photos: () => call<{ photos: AdminPhoto[] }>('GET', '/photos').then((r) => r.photos),
+  deletePhoto: (id: string) => call<{ ok: true }>('DELETE', `/photos/${id}`),
 
   people: () => call<{ people: AdminPerson[]; errors: string[] }>('GET', '/people'),
   reloadPeople: () => call<{ people: AdminPerson[]; errors: string[] }>('POST', '/people/reload', {}),
@@ -120,6 +199,44 @@ export function ago(ms: number, now = Date.now()): string {
 
 /** Same loose matching as the server: "bat 427" finds BAT-427. */
 export const normalizeCode = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Where an admin photo can be viewed (same-origin, cookie-authenticated). */
+export const photoUrl = (id: string, kind: 'resized' | 'original', download = false) =>
+  `/api/admin/photos/${id}/${kind}${download ? '?download=1' : ''}`;
+
+/** "after 3 messages", "at 22:30 for 10 min", ... */
+export function triggerLabel(t: GateTrigger): string {
+  switch (t.type) {
+    case 'session_start':
+      return 'when they start';
+    case 'after_messages':
+      return `after ${t.count} message${t.count === 1 ? '' : 's'}`;
+    case 'curse_break':
+      return 'to break a curse';
+    case 'secret_level':
+      return `before secret level ${t.level}`;
+    case 'admin_forced':
+      return 'only when forced';
+    case 'timed_global': {
+      const at = new Date(t.at).toLocaleString('nb-NO', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      return `everyone at ${at}, ${t.deadline_minutes} min`;
+    }
+  }
+}
+
+export const GATE_STATUS_LABELS: Record<GateStatus, string> = {
+  active: 'Active',
+  passed: 'Passed',
+  expired: 'Expired',
+  cancelled: 'Cancelled',
+};
+
+export const PHOTO_STATUS_LABELS: Record<PhotoStatus, string> = {
+  verifying: 'Checking',
+  passed: 'Passed',
+  failed: 'Failed',
+  unverified: 'Unverified',
+};
 
 export const STATE_LABELS: Record<SessionState, string> = {
   guest: 'Guest',

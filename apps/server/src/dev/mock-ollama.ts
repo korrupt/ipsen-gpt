@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 /**
  * A tiny fake Ollama for development and tests. Implements the streaming
  * NDJSON format of POST /api/chat plus GET /api/tags and /api/version.
+ * Requests with a JSON `format` (photo verification) get a verdict instead of chat.
  */
 export type MockMode =
   | { kind: 'reply'; text?: string }
@@ -19,12 +20,25 @@ export type MockMode =
   /** Stream a few tokens, then cut the connection without `done`. */
   | { kind: 'truncate' };
 
+/**
+ * What the mock says about photos: yes, no, not JSON, no then yes in turn, or
+ * exactly `text`. Errors and delays still follow the mode.
+ */
+export type MockVerdict = 'pass' | 'fail' | 'bad' | 'cycle' | { text: string };
+
+const VERDICTS = {
+  pass: JSON.stringify({ contains_target: true, confidence: 0.92, reason: 'Mock: that is exactly it.' }),
+  fail: JSON.stringify({ contains_target: false, confidence: 0.88, reason: 'Mock: I only see a blurry living room.' }),
+  bad: 'I think it is probably fine?',
+} as const;
+
 export interface MockOllamaOptions {
   port?: number;
   host?: string;
   /** Delay between streamed tokens. */
   tokenDelayMs?: number;
   mode?: MockMode;
+  verdict?: MockVerdict;
 }
 
 export interface MockOllama {
@@ -34,6 +48,7 @@ export interface MockOllama {
   /** Number of /api/chat streams the client cut off before they finished. */
   readonly abortedStreams: number;
   setMode(mode: MockMode): void;
+  setVerdict(verdict: MockVerdict): void;
   close(): Promise<void>;
 }
 
@@ -53,6 +68,8 @@ function tokenize(text: string): string[] {
 
 export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<MockOllama> {
   let mode: MockMode = opts.mode ?? { kind: 'reply' };
+  let verdict: MockVerdict = opts.verdict ?? 'pass';
+  let verdictCount = 0;
   const tokenDelayMs = opts.tokenDelayMs ?? 40;
   const requests: unknown[] = [];
   let replyIndex = 0;
@@ -78,7 +95,7 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
 
     let raw = '';
     for await (const chunk of req) raw += chunk;
-    const body = JSON.parse(raw) as { model?: string };
+    const body = JSON.parse(raw) as { model?: string; format?: unknown };
     requests.push(body);
 
     const current = mode;
@@ -92,8 +109,13 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
     }
 
     res.setHeader('content-type', 'application/x-ndjson');
-    const text =
-      (current.kind === 'reply' || current.kind === 'delay') && current.text !== undefined
+    const verdictText = () => {
+      if (typeof verdict === 'object') return verdict.text;
+      return VERDICTS[verdict === 'cycle' ? (verdictCount++ % 2 === 0 ? 'fail' : 'pass') : verdict];
+    };
+    const text = body.format
+      ? verdictText()
+      : (current.kind === 'reply' || current.kind === 'delay') && current.text !== undefined
         ? current.text
         : CANNED_REPLIES[replyIndex++ % CANNED_REPLIES.length]!;
     let tokens = tokenize(text);
@@ -144,6 +166,9 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
     },
     setMode(m) {
       mode = m;
+    },
+    setVerdict(v) {
+      verdict = v;
     },
     close() {
       for (const s of sockets) s.destroy();

@@ -1,3 +1,5 @@
+import type { GateView } from './photos';
+
 const TOKEN_KEY = 'ipsengpt.token';
 
 export type SessionState = 'guest' | 'pending_claim' | 'claimed';
@@ -79,13 +81,17 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return (await res.json()) as T;
 }
 
-export async function createSession(name: string): Promise<SessionView> {
-  const { token, session } = await request<{ token: string; session: SessionView }>('POST', '/api/session', { name });
+export async function createSession(name: string): Promise<{ session: SessionView; gate: GateView | null }> {
+  const { token, session, gate } = await request<{ token: string; session: SessionView; gate: GateView | null }>(
+    'POST',
+    '/api/session',
+    { name },
+  );
   setToken(token);
-  return session;
+  return { session, gate: gate ?? null };
 }
 
-export function fetchSession(): Promise<{ session: SessionView; messages: HistoryItem[] }> {
+export function fetchSession(): Promise<{ session: SessionView; messages: HistoryItem[]; gate?: GateView | null }> {
   return request('GET', '/api/session');
 }
 

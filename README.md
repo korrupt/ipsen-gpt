@@ -6,8 +6,9 @@ Halloween costume chatbot. See [PLAN.md](PLAN.md) for the full spec.
 apps/server   Express + TypeScript API (SSE chat streaming against Ollama)
 apps/web      React + Vite frontend: guest chat at /, admin dashboard at /admin/
 content/      persona.md (the system prompt, never sent to the client)
+              gates.json (photo gates for everyone)
               people.example/ (an example person folder)
-data/         runtime state, gitignored: SQLite DB + people/ (volumes in production)
+data/         runtime state, gitignored: SQLite DB, people/, photos/ (volumes in production)
 deploy/       Docker Compose, Nginx, droplet + PC scripts, deploy tests (see Deployment)
 ```
 
@@ -46,6 +47,57 @@ The persona (`content/persona.md`) is re-read on every message, so edits apply w
   [content/people.example](content/people.example). Edit them by hand and press
   "Reload from disk", or edit in admin. Deleted people go to `PEOPLE_DIR/.trash/`.
   A person's info only reaches the model in their own chat, after their claim is approved.
+
+## Photo gates
+
+A gate blocks a guest's chat until they send a photo of something ("a pumpkin"). Only server code
+unlocks it, after the vision model says yes with at least `PHOTO_CONFIDENCE_MIN` confidence.
+Nothing typed in the chat can unlock it: while a gate is active, messages get an in-character refusal
+and never reach the normal chat flow.
+
+Gates are defined in [content/gates.json](content/gates.json) (everyone) and in
+`PEOPLE_DIR/<slug>/gates.json` (only that person, once their claim is approved). Both are re-read on
+every use, so edits apply without a restart; mistakes show up in Admin → Gates.
+
+```json
+{
+  "id": "pumpkin",
+  "target": "a pumpkin or a jack-o'-lantern",
+  "guest_prompt": "Bring me a photo of a pumpkin before I say another word.",
+  "refusal_lines": ["No pumpkin, no prophecy."],
+  "points": 10,
+  "trigger": { "type": "after_messages", "count": 5 }
+}
+```
+
+| `trigger.type` | When |
+| --- | --- |
+| `session_start` | Before a new guest can chat. In a person's file: when their claim is approved. |
+| `after_messages` | Once the guest has sent `count` messages. |
+| `timed_global` | At `at` (ISO time **with timezone**, e.g. `2026-10-31T22:30:00+01:00`), for every guest, until `deadline_minutes` later. Then it expires; whoever didn't make it misses the points. |
+| `admin_forced` | Only when you force it in admin. |
+| `curse_break`, `secret_level` | Reserved for curses (Phase 5) and the secrets game (Phase 6). |
+
+- `target` goes into the verification prompt: describe what the camera should see.
+- `refusal_lines` are used in turn. Leave it empty to let the model make up refusals.
+- Each triggered gate fires once per guest. You can force any gate again.
+
+**Admin → Gates:** force a gate (or a custom one you type in) on one guest or everyone, with an
+optional deadline; cancel active gates (for example if the PC is down and nobody can pass).
+**Admin → Photos:** every attempt (passed, failed, unverified) with what the model saw; open,
+download or delete. Photos are never served to guests.
+
+**Upload flow:** the guest ticks the consent box, takes a photo, and the browser sends a 768 px copy
+for verification. After the verdict it uploads the original (up to 20 MB) in the background.
+The server checks file types by their bytes, turns photos upright, and strips EXIF (GPS, device).
+HEIC files the server can't decode are kept as uploaded and flagged in admin.
+
+**Verification** uses the primary (PC) model only, at temperature 0, with a JSON schema. If the PC is
+down or the fallback is forced, photos are "unverified" and the guest can retry. Rate limit: one photo
+per guest per 15 s (`RATE_PHOTO_SESSION`).
+
+With `pnpm dev:mock`, the mock model fails every other photo (`MOCK_OLLAMA_VERDICT=cycle`; also
+`pass`, `fail`, `bad`).
 
 ## Theming
 
@@ -143,12 +195,12 @@ Set `ADMIN_PASSWORD` (`openssl rand -base64 18`) and check the model names.
 deploy/deploy.sh <you>@<droplet-ip>
 ```
 This runs `pnpm check`, builds `ipsengpt:<git-sha>`, streams it to the droplet with
-`docker save | ssh docker load`, syncs the compose file and persona, and runs `docker compose up -d`.
+`docker save | ssh docker load`, syncs the compose file, persona and gates, and runs `docker compose up -d`.
 The first deploy also pulls the fallback model. It then waits for `/api/health`.
 **Rollback:** set `IPSENGPT_TAG=<previous>` (printed by deploy.sh) in `/srv/ipsengpt/app/.env`, then
 `docker compose up -d`.
 
-On the droplet, `/srv/ipsengpt/` holds `app/` (compose, `.env`, `content/persona.md`), `db/`,
+On the droplet, `/srv/ipsengpt/` holds `app/` (compose, `.env`, `content/persona.md` and `gates.json`), `db/`,
 `people/`, `photos/` and `backups/`. Data lives in bind mounts, so `up --build`, redeploys and
 container restarts never touch it.
 
@@ -190,6 +242,8 @@ docker compose start app
 - Logs: `docker compose logs -f app` (in `/srv/ipsengpt/app`).
 - Persona: edit `/srv/ipsengpt/app/content/persona.md`. It's live on the next message (deploy.sh overwrites it with the repo version).
 - People: edit `/srv/ipsengpt/people/<slug>/person.md`, then Admin → People → *Reload from disk*.
+- Gates: edit `/srv/ipsengpt/app/content/gates.json` or `/srv/ipsengpt/people/<slug>/gates.json`. Live on next use
+  (deploy.sh overwrites `content/gates.json` with the repo version).
 
 ### Party checklist (PC)
 

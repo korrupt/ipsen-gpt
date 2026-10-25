@@ -45,6 +45,7 @@ describe('guest session API', () => {
     const res = await get(e.app, token);
     expect(res.body).toEqual({
       session: { name: 'Kari', state: 'guest', claimCode: null, notice: null },
+      gate: null,
       messages: [
         { role: 'user', content: 'hi' },
         { role: 'assistant', content: 'boo' },

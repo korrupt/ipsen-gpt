@@ -61,6 +61,7 @@ assert_contains "$tag" "$(git -C "$REPO_ROOT" rev-parse --short HEAD)" "IPSENGPT
 assert_contains "$out" "previous: previous-tag" "reports the previous tag for rollback"
 cmp -s "$DEPLOY_DIR/docker-compose.yml" "$WORK/app/docker-compose.yml" && pass "compose file synced" || fail "compose not synced"
 cmp -s "$REPO_ROOT/content/persona.md" "$WORK/app/content/persona.md" && pass "persona synced" || fail "persona not synced"
+cmp -s "$REPO_ROOT/content/gates.json" "$WORK/app/content/gates.json" && pass "gates synced" || fail "gates not synced"
 docker image inspect "ipsengpt:$tag" >/dev/null && pass "image loaded via docker save | ssh docker load"
 
 BASE="http://127.0.0.1:$APP_PORT"

@@ -1,5 +1,5 @@
 import type { Config } from './config.js';
-import { OllamaError, streamChat, type ChatMessage } from './ollama.js';
+import { OllamaError, streamChat, type ChatMessage, type ChatOptions } from './ollama.js';
 import type { Settings } from './settings.js';
 
 export type Backend = 'primary' | 'fallback';
@@ -82,6 +82,33 @@ export class Llm {
       yield* gen;
       return;
     }
+  }
+
+  /**
+   * A complete reply from the primary, the only model that can see images.
+   * Null when the primary is off limits (forced off, or failed recently);
+   * throws OllamaError if it fails now. Never falls back.
+   */
+  async vision(
+    messages: ChatMessage[],
+    opts: ChatOptions & { timeoutMs: number },
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    if (this.plan()[0] !== 'primary') return null;
+    let text = '';
+    try {
+      for await (const delta of streamChat({ ...this.cfg, replyTimeoutMs: opts.timeoutMs }, messages, signal, opts)) {
+        text += delta;
+      }
+    } catch (err) {
+      // Only "the PC is gone or swamped" sends chat to the fallback; a bad image
+      // or a slow verdict says nothing about the primary's health.
+      const down = err instanceof OllamaError && ['connect_timeout', 'unreachable', 'first_token_timeout'].includes(err.kind);
+      if (down) this.markPrimaryDown(err);
+      throw err;
+    }
+    this.primaryDownUntil = 0;
+    return text;
   }
 
   private markPrimaryDown(err: unknown) {

@@ -129,6 +129,21 @@ export class SessionStore {
     return row && toSession(row);
   }
 
+  /** Ids of live sessions that have a name: who a global gate goes to. */
+  liveNamedIds(): string[] {
+    return (this.db.prepare(`SELECT id FROM sessions WHERE name IS NOT NULL AND ${LIVE}`).all() as { id: string }[]).map(
+      (r) => r.id,
+    );
+  }
+
+  userMessageCount(sessionId: string): number {
+    return (
+      this.db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE session_id = ? AND role = 'user'`).get(sessionId) as {
+        n: number;
+      }
+    ).n;
+  }
+
   /** Updates last_seen_at, at most every 30 s per session. */
   touch(s: Session): void {
     const now = this.now();

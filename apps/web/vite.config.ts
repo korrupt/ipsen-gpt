@@ -9,8 +9,8 @@ export default defineConfig({
     rollupOptions: {
       // Guest app at /, admin dashboard at /admin/.
       input: {
-        main: resolve(__dirname, 'index.html'),
-        admin: resolve(__dirname, 'admin/index.html'),
+        main: resolve(import.meta.dirname, 'index.html'),
+        admin: resolve(import.meta.dirname, 'admin/index.html'),
       },
     },
   },

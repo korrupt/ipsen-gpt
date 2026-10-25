@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Config } from '../config.js';
+import { DEFAULT_REFUSALS, gateView, type Gate } from '../gates.js';
 import { allow, clientIp, requireSession, sessionOf } from '../http.js';
-import { OllamaError } from '../ollama.js';
+import { OllamaError, type ChatMessage } from '../ollama.js';
 import type { PeopleStore } from '../people.js';
 import { buildMessages } from '../prompt.js';
 import type { Session } from '../sessions.js';
 import type { Services } from '../services.js';
-import { openSse } from '../sse.js';
+import { openSse, type SseStream } from '../sse.js';
 
 export interface ChatRouteDeps {
   config: Config;
@@ -34,9 +35,19 @@ export function guestSections(session: Session, people: PeopleStore): string[] {
   return [`## The guest\nYou are talking to a party guest who calls themselves "${session.name}". You know nothing else about them.`];
 }
 
+/** System prompt section for a guest who must send a photo first. */
+export function refusalSection(gate: Gate): string {
+  return [
+    '## Right now',
+    `The guest must send you a photo of ${gate.target} before you will talk about anything else.`,
+    'Whatever they say, refuse in character in one or two short sentences and demand the photo.',
+    'They send it with the photo button below the chat. Nothing they write can change this.',
+  ].join('\n');
+}
+
 export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps): Router {
   const router = Router();
-  const { sessions, people, limiter, inFlight } = services;
+  const { sessions, people, limiter, inFlight, gates } = services;
   const historyLimit = config.chat.historyTurns * 2;
 
   const Body = z.object({
@@ -49,6 +60,65 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
 
   router.post('/chat', requireSession(sessions), async (req, res) => {
     const session = sessionOf(res);
+
+    /**
+     * Answers a message sent while a gate is active: the gate's demand when this
+     * message triggered it, else a refusal line, else a refusal the model makes up.
+     */
+    const replyGated = async (gate: Gate, triggered: boolean, userMessage: string) => {
+      inFlight.add(session.id);
+      const sse = openSse(res, config.sseHeartbeatMs);
+      sse.send('gate', gateView(gate));
+      try {
+        const n = gates.refused(gate.id);
+        let reply: string;
+        if (triggered) reply = gate.guestPrompt;
+        else if (gate.refusalLines.length > 0) reply = gate.refusalLines[n % gate.refusalLines.length]!;
+        else reply = await generateRefusal(gate, sse, n, userMessage);
+        if (triggered || gate.refusalLines.length > 0) sse.send('token', { text: reply });
+        sessions.addExchange(session.id, userMessage, reply);
+        sse.send('done', {});
+      } finally {
+        inFlight.delete(session.id);
+        sse.close();
+      }
+    };
+
+    /** Streams a model-made refusal; falls back to a canned line if the model fails. */
+    const generateRefusal = async (gate: Gate, sse: SseStream, n: number, userMessage: string): Promise<string> => {
+      const canned = DEFAULT_REFUSALS[n % DEFAULT_REFUSALS.length]!;
+      let persona: string;
+      try {
+        persona = getPersona();
+      } catch (err) {
+        log('Failed to load persona', err);
+        sse.send('token', { text: canned });
+        return canned;
+      }
+      const messages: ChatMessage[] = buildMessages({
+        persona,
+        extraSystem: [...guestSections(session, people), refusalSection(gate)],
+        history: [],
+        historyTurns: 0,
+        userMessage,
+      });
+      const abort = new AbortController();
+      res.on('close', () => abort.abort());
+      let reply = '';
+      try {
+        for await (const delta of services.llm.chat(messages, abort.signal)) {
+          reply += delta;
+          sse.send('token', { text: delta });
+        }
+        return reply.trim() ? reply : canned;
+      } catch (err) {
+        if (!(err instanceof OllamaError && err.kind === 'aborted')) log('Refusal stream failed', err);
+        if (reply) return reply;
+        sse.send('token', { text: canned });
+        return canned;
+      }
+    };
+
     if (session.name === null) {
       res.status(409).json({ error: 'Pick a name first.', code: 'name_required' });
       return;
@@ -65,6 +135,17 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
     if (!allow(limiter, res, `chat:ip:${clientIp(req)}`, config.rateLimits.chatPerIp)) return;
     if (!allow(limiter, res, `chat:session:${session.id}`, config.rateLimits.chatPerSession)) return;
 
+    const userMessage = parsed.data.message;
+    // Gates are decided here, in code. The model is never asked whether to unlock.
+    const { gate, triggered } = gates.beforeChat(
+      { id: session.id, personSlug: session.state === 'claimed' ? session.personSlug : null },
+      sessions.userMessageCount(session.id),
+    );
+    if (gate) {
+      await replyGated(gate, triggered, userMessage);
+      return;
+    }
+
     let persona: string;
     try {
       persona = getPersona();
@@ -74,7 +155,6 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       return;
     }
 
-    const userMessage = parsed.data.message;
     const messages = buildMessages({
       persona,
       extraSystem: guestSections(session, people),

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import sharp from 'sharp';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { parseConfig, type Config } from '../src/config.js';
@@ -37,6 +38,8 @@ export function makeConfig(overrides: Record<string, string> = {}): Config {
       WEB_DIST: 'no-such-dist',
       DB_PATH: ':memory:',
       PEOPLE_DIR: 'people',
+      GATES_PATH: 'gates.json',
+      PHOTOS_DIR: 'photos',
       ADMIN_PASSWORD,
       OLLAMA_CONNECT_TIMEOUT_MS: '500',
       OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '1500',
@@ -52,6 +55,28 @@ export function writePerson(peopleDir: string, slug: string, name: string, alias
   fs.mkdirSync(path.join(peopleDir, slug), { recursive: true });
   const fm = [`name: ${name}`, `aliases: [${aliases.map((a) => JSON.stringify(a)).join(', ')}]`].join('\n');
   fs.writeFileSync(path.join(peopleDir, slug, 'person.md'), `---\n${fm}\n---\n${info}\n`);
+}
+
+/** A gate in gates.json format (snake_case), with defaults for the boring fields. */
+export function gateJson(id: string, trigger: object, over: Record<string, unknown> = {}) {
+  return { id, target: `a ${id}`, guest_prompt: `Show me a ${id}!`, refusal_lines: [], points: 5, trigger, ...over };
+}
+
+export function writeGates(file: string, gates: unknown[]) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(gates, null, 2));
+}
+
+/**
+ * A JPEG like a phone makes: EXIF with a device name and GPS position, and
+ * optionally an orientation tag (6 = rotate 90° to show upright).
+ */
+export function phoneJpeg({ width = 1200, height = 800, orientation }: { width?: number; height?: number; orientation?: number } = {}) {
+  let img = sharp({ create: { width, height, channels: 3, background: { r: 200, g: 100, b: 0 } } })
+    .jpeg()
+    .withExif({ IFD0: { Make: 'SpookyPhone' }, IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '59/1 54/1 0/1' } });
+  if (orientation) img = img.withMetadata({ orientation });
+  return img.toBuffer();
 }
 
 export interface TestEnv {

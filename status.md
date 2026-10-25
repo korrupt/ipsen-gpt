@@ -19,14 +19,15 @@ Handover notes for the next agent. Read with [PLAN.md](PLAN.md) (the spec), [CLA
 | 1. Core chat | done | `2a65cc9` |
 | 2. Sessions & identity | done | `a21c5cf` |
 | 3. Deployment | done locally; **not yet deployed to the real droplet** | `4be013c`, `ce13778`, `c7fb9ad` |
-| 4. Photo gates | **next**, not started | |
+| 4. Photo gates | **built, waiting for the user's test**; accuracy on the 8b not measured yet (GPU was busy) | uncommitted |
 | 5. Curses + live events | not started | |
 | 6. Secrets game | not started (design must be confirmed by the user first) | |
 | 7. Hardening & load tests | not started | |
 | 8. Skin pass | not started | |
 
-Gates at last run: `pnpm check` passes (typecheck, 140 server + 35 web tests, build);
-`pnpm test:deploy` passes (shellcheck + 7 Docker suites, 86 checks, ~2 min).
+Gates at last run: `pnpm check` passes (typecheck, 198 server + 49 web tests, build).
+`pnpm test:deploy` last passed on native Ubuntu (86 checks); **not run in WSL yet: Docker isn't installed
+here.** Phase 4 changed the Dockerfile, deploy.sh and test-deploy.sh, so run it before deploying.
 
 ## Decisions made with the user
 
@@ -58,21 +59,28 @@ Gates at last run: `pnpm check` passes (typecheck, 140 server + 35 web tests, bu
   `OLLAMA_CONTEXT_LENGTH=4096` is pinned on the PC to match the app's `num_ctx`; a mismatch makes
   Ollama reload the model.
 
+- **Photo gates (Phase 4), decided with the user:** verification at temperature 0. The user
+  declined: a second "screen/printout" check, failing closed on bad JSON (it's "unverified" instead;
+  it never unlocks either way), and revoking a passed gate. Admin *can* cancel an active gate.
+  A `timed_global` gate blocks chat until passed or its deadline; at the deadline it just expires
+  (no points). A failed photo shows the guest an in-character line **plus the model's reason**.
+- Gate examples in `content/gates.json` are all `admin_forced`, so nothing blocks guests until the
+  user picks triggers (still an open question in PLAN.md).
+
 ## Open items and pending confirmations
 
-- **Phase 4 photo-gate hardening, proposed and not yet confirmed:** temperature 0 for verification;
-  a second independent check ("is this mainly a screen, printout or written text?" → reject);
-  fail closed on non-schema JSON; admin can revoke a gate. Ask before implementing.
-- Phase 4 should test gate accuracy on the **8b** (party model), not only the laptop's 4b.
-- The nginx route `location /api/photos/` (25 MB limit, no request buffering) is reserved for
-  Phase 4's original-photo upload. Use that path prefix, or update `deploy/droplet/nginx/ipsengpt.conf`
-  and `apps/server/test/deploy-config.test.ts` to match.
+- **Phase 4 still to do (needs the GPU):** measure gate accuracy on the **8b** with real photos
+  (right object, wrong object, a photo of a screen showing the object, the word written on paper).
+  Tune `PHOTO_CONFIDENCE_MIN` (0.7) from that.
+- **WSL setup the user still has to do** (needs sudo): run `deploy/pc/setup-ollama.sh qwen3-vl:8b-instruct`
+  after gaming (it pins 5.8 GB of VRAM); install Docker Engine for `pnpm test:deploy`; create `.env`.
+- A gate forced while a guest is idle only shows up on their next message or page load. Phase 5's
+  SSE events should push it (and the countdown of a `timed_global` gate).
 - `SSE_ROUTES` in `apps/server/src/sse.ts` lists `/api/events` for Phase 5. Nginx already has an
   unbuffered location for it.
-- The photos volume (`/srv/ipsengpt/photos` → `/data/photos`) is mounted but unused; Phase 4 needs a
-  `PHOTOS_DIR` config (default `/data/photos` in the image).
 - The guest page polls `/api/session` every 5 s while a claim is pending; Phase 5's SSE events
   should replace that.
+- Points are stored per gate (`gates.points`, status `passed`) but nothing sums them yet (Phase 6).
 - PLAN.md open questions still open: character voice, gate targets and triggers, person-file
   content, secrets game design.
 - Real-droplet verification (README "Deployment → 4. Verify") hasn't happened yet. Nothing has
@@ -118,6 +126,10 @@ apps/server/src/
   ollama.ts                       streamChat: NDJSON streaming, health check + timeouts
   llm.ts                          primary/fallback routing, probe(), status for admin
   prompt.ts                       persona + extra system sections + trimmed history
+  gateDefs.ts                     gates.json parsing (global + per person), re-read on every use
+  gates.ts                        GateStore: triggers, force/cancel, expiry, timed gates; only it sets passed
+  photos.ts                       magic-byte check, sharp resize/EXIF strip, PhotoStore (attempt records + files)
+  verify.ts                       verification prompt, JSON schema, verdict parsing
   db.ts                           better-sqlite3, WAL, append-only MIGRATIONS (PRAGMA user_version)
   sessions.ts                     guest sessions, names, claims, messages (all identity rules)
   people.ts                       person folders on disk (person.md + gates.json), .trash on delete
@@ -126,11 +138,13 @@ apps/server/src/
   settings.ts, errorLog.ts        persisted admin switches (forceFallback), recent errors
   sse.ts                          SSE helper (heartbeat, X-Accel-Buffering), SSE_ROUTES
   admin/auth.ts                   admin cookie sessions (HttpOnly, Secure, SameSite=Strict)
-  routes/{chat,session,admin}.ts  HTTP API
+  routes/{chat,session,admin}.ts  HTTP API (chat answers gated messages with refusals)
+  routes/photos.ts                POST /api/photos/verify, PUT /api/photos/:id/original
   dev/mock-ollama*.ts             mock Ollama (reply/hang/delay/http_error/stream_error/truncate) + blackhole
 apps/server/test/                 vitest + supertest; helpers.ts has makeEnv (in-memory DB, fake clock)
-apps/web/src/                     guest app (App.tsx, components/, lib/sse.ts parser, lib/session.ts)
-apps/web/src/admin/               admin app: Claims, Sessions, People, System tabs
+apps/web/src/                     guest app (App.tsx, components/, lib/sse.ts parser, lib/session.ts,
+                                  components/GatePanel.tsx + lib/photos.ts for the photo flow)
+apps/web/src/admin/               admin app: Claims, Sessions, Gates, Photos, People, System tabs
 deploy/                           compose, env template, deploy.sh, droplet/ (setup, nginx, sshd,
                                   backup), pc/ (setup-ollama, tunnel), test/ (Docker test suites)
 ```
@@ -151,6 +165,10 @@ deploy/                           compose, env template, deploy.sh, droplet/ (se
   "bad ports" (1, 9, ...) itself without connecting. Tests that need a refused connection use
   `refusedUrl()` in `apps/server/test/helpers.ts`. At runtime this only means a dead Ollama behind the
   tunnel falls back after the 3 s health check instead of at once.
+- sharp's prebuilt binaries can't decode HEIC (only AVIF); such originals are stored as-is and flagged.
+  It *can* decode SVG/GIF/TIFF, so the magic-byte check is what keeps those out.
+- A per-session "one at a time" guard must be taken before the request body is read, or two
+  uploads sent together both get in (`gateFlow.test.ts` stalls one upload mid-body to prove it).
 - Verify that tests actually bite: several deploy tests passed for the wrong reason (header-only
   timing, `timeout` exit codes, case-sensitive header checks) until mutation-checked. When adding a
   safety test, temporarily break the code and confirm the test fails.

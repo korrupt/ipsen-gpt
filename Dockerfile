@@ -24,12 +24,14 @@ ENV NODE_ENV=production \
     WEB_DIST=/app/web \
     PERSONA_PATH=/app/content/persona.md \
     DB_PATH=/data/db/ipsengpt.sqlite \
-    PEOPLE_DIR=/data/people
+    PEOPLE_DIR=/data/people \
+    GATES_PATH=/app/content/gates.json \
+    PHOTOS_DIR=/data/photos
 WORKDIR /app
 COPY --from=build /out ./server
 COPY --from=build /src/apps/web/dist ./web
-# Default persona; production mounts ./content over it so edits need no rebuild.
-COPY content/persona.md ./content/persona.md
+# Default persona and gates; production mounts ./content over them so edits need no rebuild.
+COPY content/persona.md content/gates.json ./content/
 USER node
 WORKDIR /app/server
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

@@ -3,6 +3,15 @@ import type { Config } from './config.js';
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Base64 images (vision models only). */
+  images?: string[];
+}
+
+export interface ChatOptions {
+  /** JSON schema the reply must follow (Ollama structured outputs). */
+  format?: object;
+  /** Overrides the configured temperature. */
+  temperature?: number;
 }
 
 export type OllamaErrorKind =
@@ -63,6 +72,7 @@ export async function* streamChat(
   cfg: Config['ollama'],
   messages: ChatMessage[],
   signal?: AbortSignal,
+  opts: ChatOptions = {},
 ): AsyncGenerator<string, void, void> {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -116,7 +126,9 @@ export async function* streamChat(
           messages,
           stream: true,
           think: false,
-          options: { num_ctx: cfg.numCtx, temperature: cfg.temperature },
+          ...(opts.format ? { format: opts.format } : {}),
+          // num_ctx must be the same on every request, or Ollama reloads the model.
+          options: { num_ctx: cfg.numCtx, temperature: opts.temperature ?? cfg.temperature },
         }),
         signal: controller.signal,
       });

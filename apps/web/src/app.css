@@ -371,3 +371,99 @@ button {
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
+
+/* Photo gate */
+.gate {
+  flex: none;
+  padding: 8px 12px 0;
+}
+
+.gate__box {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-gate-border);
+  border-radius: 18px;
+  background: var(--color-gate-bg);
+}
+
+.gate__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.gate__portrait {
+  flex: none;
+}
+
+.gate__prompt {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.gate__deadline {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-claim-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.gate__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.gate__consent input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.gate__button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 18px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gate__button:disabled {
+  background: var(--color-disabled);
+  cursor: default;
+}
+
+.gate__feedback {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.gate__feedback p {
+  margin: 0;
+}
+
+.gate__feedback--failed,
+.gate__feedback--error {
+  color: var(--color-error);
+}
+
+.gate__feedback .gate__reason {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}

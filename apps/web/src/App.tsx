@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ClaimBanner } from './components/ClaimBanner';
 import { Composer } from './components/Composer';
+import { GatePanel } from './components/GatePanel';
 import { Header } from './components/Header';
 import { MessageList, type Message } from './components/MessageList';
 import { NamePicker } from './components/NamePicker';
 import { useVisualViewport } from './hooks/useVisualViewport';
 import { sendChat } from './lib/chatApi';
+import type { GateView, VerifyResult } from './lib/photos';
 import {
   ApiError,
   chooseName,
@@ -36,6 +38,8 @@ export function App() {
   useVisualViewport();
   const [screen, setScreen] = useState<Screen>(() => (getToken() ? { kind: 'loading' } : { kind: 'name', notice: null, existing: false }));
   const [session, setSession] = useState<SessionView | null>(null);
+  /** The photo gate blocking the chat, if any. */
+  const [gate, setGate] = useState<GateView | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -48,14 +52,16 @@ export function App() {
 
   const sessionGone = useCallback(() => {
     setSession(null);
+    setGate(null);
     setMessages([]);
     setScreen({ kind: 'name', notice: SESSION_ENDED_NOTICE, existing: false });
   }, []);
 
   const load = useCallback(async () => {
     try {
-      const { session: s, messages: history } = await fetchSession();
+      const { session: s, messages: history, gate: g } = await fetchSession();
       setMessages(fromHistory(history));
+      setGate(g ?? null);
       applySession(s);
     } catch (err) {
       if (err instanceof SessionGoneError) setScreen({ kind: 'name', notice: null, existing: false });
@@ -72,7 +78,9 @@ export function App() {
     if (session?.state !== 'pending_claim') return;
     const timer = setInterval(async () => {
       try {
-        applySession((await fetchSession()).session);
+        const r = await fetchSession();
+        setGate(r.gate ?? null);
+        applySession(r.session);
       } catch (err) {
         if (err instanceof SessionGoneError) sessionGone();
       }
@@ -82,8 +90,13 @@ export function App() {
 
   const pickName = async (name: string): Promise<string | null> => {
     try {
-      const existing = screen.kind === 'name' && screen.existing;
-      applySession(existing ? await chooseName(name) : await createSession(name));
+      if (screen.kind === 'name' && screen.existing) {
+        applySession(await chooseName(name));
+      } else {
+        const created = await createSession(name);
+        setGate(created.gate);
+        applySession(created.session);
+      }
       return null;
     } catch (err) {
       if (err instanceof SessionGoneError) {
@@ -111,7 +124,7 @@ export function App() {
       const abort = new AbortController();
       abortRef.current = abort;
       try {
-        await sendChat(text, (t) => patchLast((m) => ({ content: m.content + t })), abort.signal);
+        await sendChat(text, (t) => patchLast((m) => ({ content: m.content + t })), abort.signal, setGate);
         patchLast(() => ({ status: 'done' }));
       } catch (err) {
         if (abort.signal.aborted) {
@@ -133,6 +146,23 @@ export function App() {
   );
 
   const onSend = (text: string) => void send(text, messages);
+
+  const onGateResult = (r: VerifyResult) => {
+    setGate(r.gate);
+    if (r.kind === 'verdict' && r.result === 'passed') {
+      setMessages((ms) => [...ms, { id: newId(), role: 'assistant', content: r.message, status: 'done' }]);
+    }
+  };
+
+  // A deadline passed: the server knows whether another gate is waiting.
+  const onGateExpired = useCallback(async () => {
+    try {
+      setGate((await fetchSession()).gate ?? null);
+    } catch (err) {
+      if (err instanceof SessionGoneError) sessionGone();
+      else setGate(null);
+    }
+  }, [sessionGone]);
   const onStop = () => abortRef.current?.abort();
 
   // Drop the failed reply and its question, then ask again.
@@ -161,6 +191,7 @@ export function App() {
         <>
           {session?.state === 'pending_claim' && session.claimCode && <ClaimBanner code={session.claimCode} />}
           <MessageList messages={messages} onRetry={onRetry} />
+          {gate && <GatePanel gate={gate} onResult={onGateResult} onSessionGone={sessionGone} onExpired={onGateExpired} />}
           <Composer streaming={streaming} onSend={onSend} onStop={onStop} />
         </>
       )}

@@ -48,6 +48,13 @@ describe('docker-compose.yml', () => {
     }
   });
 
+  it('the image writes photos into the photos volume and reads gates from the mounted content', () => {
+    const dockerfile = fs.readFileSync(path.join(DEPLOY, '../Dockerfile'), 'utf8');
+    expect(dockerfile).toMatch(/PHOTOS_DIR=\/data\/photos\b/);
+    expect(dockerfile).toMatch(/GATES_PATH=\/app\/content\/gates\.json\b/);
+    expect(compose.services.app?.volumes).toContain('./content:/app/content:ro');
+  });
+
   it('pins the fallback Ollama image and keeps its model loaded', () => {
     const ollama = compose.services.ollama!;
     expect(ollama.image).toMatch(/^ollama\/ollama:\d+\.\d+\.\d+$/);
@@ -71,6 +78,8 @@ describe('env.production.example', () => {
     expect(c.ollama.connectTimeoutMs).toBe(3000);
     expect(c.ollama.firstTokenTimeoutMs).toBe(15000);
     expect(c.admin.cookieSecure).toBe(true);
+    expect(c.photos.confidenceMin).toBe(0.7);
+    expect(c.rateLimits.photoPerSession).toEqual({ count: 1, windowMs: 15_000 });
   });
 });
 

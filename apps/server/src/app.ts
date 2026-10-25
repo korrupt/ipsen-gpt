@@ -5,6 +5,7 @@ import type { Config } from './config.js';
 import { loadPersona } from './prompt.js';
 import { adminRouter } from './routes/admin.js';
 import { chatRouter } from './routes/chat.js';
+import { photosRouter } from './routes/photos.js';
 import { sessionRouter } from './routes/session.js';
 import type { Services } from './services.js';
 
@@ -26,7 +27,7 @@ export function createApp({ config, services, getPersona, log = services.log }: 
   api.get('/health', (_req, res) => {
     res.json({ ok: true });
   });
-  api.use(sessionRouter(config, services.sessions, services.limiter));
+  api.use(sessionRouter(config, services));
   api.use(
     chatRouter({
       config,
@@ -36,6 +37,7 @@ export function createApp({ config, services, getPersona, log = services.log }: 
       log,
     }),
   );
+  api.use(photosRouter(config, services));
   api.use('/admin', adminRouter(config, services));
   api.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
@@ -43,7 +45,8 @@ export function createApp({ config, services, getPersona, log = services.log }: 
   api.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const status = (err as { status?: number }).status ?? 500;
     if (status >= 500) log('Unhandled API error', err);
-    res.status(status).json({ error: status >= 500 ? 'Internal error' : 'Bad request' });
+    const error = status >= 500 ? 'Internal error' : status === 413 ? 'That file is too big.' : 'Bad request';
+    res.status(status).json({ error });
   });
   app.use('/api', api);
 

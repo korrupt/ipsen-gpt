@@ -49,6 +49,60 @@ const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   );
   `,
+  `
+  -- A gate given to one session. The definition is copied in, so editing
+  -- gates.json mid-party never changes a gate someone is already facing.
+  CREATE TABLE gates (
+    id            TEXT PRIMARY KEY,
+    session_id    TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    def_key       TEXT,
+    source        TEXT NOT NULL,
+    target        TEXT NOT NULL,
+    guest_prompt  TEXT NOT NULL,
+    refusal_lines TEXT NOT NULL,
+    points        INTEGER NOT NULL,
+    status        TEXT NOT NULL CHECK (status IN ('active', 'passed', 'expired', 'cancelled')),
+    refusals      INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    deadline_at   INTEGER,
+    resolved_at   INTEGER
+  );
+  CREATE INDEX gates_session ON gates (session_id, status);
+  -- Triggered gates fire once per session; the admin can force a gate again.
+  CREATE UNIQUE INDEX gates_once ON gates (session_id, def_key)
+    WHERE def_key IS NOT NULL AND source != 'admin_forced';
+
+  -- Timed global gates that have fired, so a restart doesn't fire them again.
+  CREATE TABLE gate_timers (
+    def_key  TEXT NOT NULL,
+    at       TEXT NOT NULL,
+    fired_at INTEGER NOT NULL,
+    PRIMARY KEY (def_key, at)
+  );
+
+  CREATE TABLE photo_attempts (
+    id                 TEXT PRIMARY KEY,
+    session_id         TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    gate_id            TEXT REFERENCES gates (id) ON DELETE SET NULL,
+    target             TEXT NOT NULL,
+    status             TEXT NOT NULL CHECK (status IN ('verifying', 'passed', 'failed', 'unverified')),
+    contains_target    INTEGER,
+    confidence         REAL,
+    reason             TEXT,
+    error              TEXT,
+    resized_file       TEXT,
+    original_file      TEXT,
+    original_mime      TEXT,
+    original_bytes     INTEGER,
+    -- 1: decoded, rotated and re-encoded without metadata. 0: stored as uploaded (e.g. HEIC).
+    original_processed INTEGER,
+    consent_at         INTEGER NOT NULL,
+    created_at         INTEGER NOT NULL,
+    verified_at        INTEGER,
+    deleted_at         INTEGER
+  );
+  CREATE INDEX photo_attempts_session ON photo_attempts (session_id, created_at);
+  `,
 ];
 
 export function openDb(dbPath: string): Db {

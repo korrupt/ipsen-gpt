@@ -98,6 +98,8 @@ describe('sessions', () => {
             { role: 'user', content: 'hello', createdAt: 0 },
             { role: 'assistant', content: 'boo', createdAt: 0 },
           ],
+          gates: [],
+          photos: [],
         }),
       'POST /api/admin/sessions/s1/end': () => json({ ok: true }),
     });

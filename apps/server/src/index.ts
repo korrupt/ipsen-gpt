@@ -17,10 +17,24 @@ const server = app.listen(config.port, config.host, () => {
   console.log(`Database: ${config.dbPath}`);
   console.log(`People: ${config.peopleDir} (${services.people.list().length} loaded)`);
   for (const e of services.people.errors) console.warn(`  people/${e}`);
+  const gates = services.gateDefs();
+  console.log(`Gates: ${config.gatesPath} (${gates.defs.length} loaded)`);
+  for (const e of gates.errors) console.warn(`  ${e}`);
+  console.log(`Photos: ${config.photos.dir}`);
   if (!services.adminAuth.enabled) console.warn('Admin is disabled: set ADMIN_PASSWORD in .env');
 });
 
+// Timed global gates and deadlines.
+const ticker = setInterval(() => {
+  try {
+    services.tick();
+  } catch (err) {
+    services.log('Gate tick failed', err);
+  }
+}, 5000);
+
 const shutdown = () => {
+  clearInterval(ticker);
   server.close(() => {
     services.db.close();
     process.exit(0);

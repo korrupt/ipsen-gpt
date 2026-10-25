@@ -1,3 +1,4 @@
+import type { GateView } from './photos';
 import { ApiError, authHeaders, checkResponse, NETWORK_ERROR } from './session';
 import { SseParser } from './sse';
 
@@ -6,9 +7,14 @@ export const MAX_INPUT_CHARS = 500;
 /**
  * Sends a message and streams the reply. Resolves when the reply is complete.
  * Rejects with SessionGoneError (401), ApiError (other failures) or an
- * AbortError if aborted.
+ * AbortError if aborted. `onGate` hears about a gate blocking the chat.
  */
-export async function sendChat(message: string, onToken: (text: string) => void, signal?: AbortSignal): Promise<void> {
+export async function sendChat(
+  message: string,
+  onToken: (text: string) => void,
+  signal?: AbortSignal,
+  onGate?: (gate: GateView) => void,
+): Promise<void> {
   let res: Response;
   try {
     res = await fetch('/api/chat', {
@@ -28,6 +34,7 @@ export async function sendChat(message: string, onToken: (text: string) => void,
   let failure: string | null = null;
   const parser = new SseParser(({ event, data }) => {
     if (event === 'token') onToken((JSON.parse(data) as { text: string }).text);
+    else if (event === 'gate') onGate?.(JSON.parse(data) as GateView);
     else if (event === 'done') finished = true;
     else if (event === 'error') failure = (JSON.parse(data) as { message: string }).message;
   });

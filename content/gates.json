@@ -1,0 +1,33 @@
+[
+  {
+    "id": "pumpkin",
+    "target": "a pumpkin or a jack-o'-lantern (real, carved, or a costume piece)",
+    "guest_prompt": "Before I say another word: bring me a photo of a pumpkin. The spirits are hungry for gourds.",
+    "refusal_lines": [
+      "No pumpkin, no prophecy.",
+      "I can smell that you have not found a pumpkin yet.",
+      "The gourd first. Then we talk."
+    ],
+    "points": 10,
+    "trigger": { "type": "admin_forced" }
+  },
+  {
+    "id": "candle",
+    "target": "a lit candle or a tea light with a visible flame",
+    "guest_prompt": "It is too dark in here, even for me. Show me a burning candle and I will listen again.",
+    "refusal_lines": [],
+    "points": 5,
+    "trigger": { "type": "admin_forced" }
+  },
+  {
+    "id": "costume-mask",
+    "target": "a person wearing a mask or face paint",
+    "guest_prompt": "I don't talk to bare faces. Send me a photo of someone in a mask or face paint.",
+    "refusal_lines": [
+      "Faces without masks make my circuits itch.",
+      "Mask. Photo. Now."
+    ],
+    "points": 10,
+    "trigger": { "type": "admin_forced" }
+  }
+]

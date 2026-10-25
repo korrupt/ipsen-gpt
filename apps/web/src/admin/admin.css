@@ -223,6 +223,13 @@ textarea {
   cursor: pointer;
 }
 
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
@@ -277,6 +284,118 @@ textarea {
   color: #9be3b8;
 }
 
+.badge--gate-active,
+.badge--photo-verifying,
+.badge--photo-unverified {
+  background: var(--color-claim-bg);
+  color: var(--color-claim-text);
+}
+
+.badge--gate-passed,
+.badge--photo-passed {
+  background: #1f4d33;
+  color: #9be3b8;
+}
+
+.badge--photo-failed {
+  background: #4d1f1f;
+  color: #f2a7a7;
+}
+
+.badge--gate-expired,
+.badge--gate-cancelled {
+  color: var(--color-text-muted);
+}
+
+/* Gates */
+.force-gate {
+  gap: 8px;
+}
+
+.force-gate__minutes {
+  max-width: 9rem;
+}
+
+.force-gate__prompt {
+  margin-top: 4px;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+/* Photos */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip--active {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.photo-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+}
+
+.photo-grid__item {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.photo-grid__item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-grid__item .badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+}
+
+.photo-grid__missing {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--color-text-muted);
+}
+
+.photo-detail__img {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
 .admin-chat {
   list-style: none;
   margin: 0;
@@ -318,10 +437,13 @@ textarea {
 
 .admin-nav__tab {
   flex: 1;
+  min-width: 0;
   min-height: 64px;
+  padding: 0 2px;
   border: 0;
   background: transparent;
   color: var(--color-text-muted);
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   position: relative;
@@ -333,15 +455,17 @@ textarea {
 }
 
 .admin-nav__badge {
-  display: inline-block;
-  min-width: 22px;
-  margin-left: 6px;
-  padding: 0 6px;
+  /* Six tabs share a phone's width: the count sits on the tab's corner. */
+  position: absolute;
+  top: 8px;
+  right: 4px;
+  min-width: 20px;
+  padding: 0 5px;
   border-radius: 999px;
   background: var(--color-claim-text);
   color: #000;
-  font-size: 13px;
-  line-height: 22px;
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .toast {

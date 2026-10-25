@@ -21,6 +21,8 @@
   --color-thinking: #ececec;
   --color-claim-bg: #3b2a12;
   --color-claim-text: #ffd27a;
+  --color-gate-bg: #2a2320;
+  --color-gate-border: rgba(255, 210, 122, 0.25);
 
   /* Typography */
   --font-family: ui-sans-serif, -apple-system, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

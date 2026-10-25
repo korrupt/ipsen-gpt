@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { adminApi, setUnauthorizedHandler } from './api';
 import { ClaimsTab } from './ClaimsTab';
+import { GatesTab } from './GatesTab';
 import { Login } from './Login';
 import { PeopleTab } from './PeopleTab';
+import { PhotosTab } from './PhotosTab';
 import { SessionsTab } from './SessionsTab';
 import { SystemTab } from './SystemTab';
 import { usePoll } from './usePoll';
 
-type Tab = 'claims' | 'sessions' | 'people' | 'system';
+type Tab = 'claims' | 'sessions' | 'gates' | 'photos' | 'people' | 'system';
 
 export function AdminApp() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -47,6 +49,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'claims', label: 'Claims', badge: claims?.length },
     { id: 'sessions', label: 'Sessions' },
+    { id: 'gates', label: 'Gates' },
+    { id: 'photos', label: 'Photos' },
     { id: 'people', label: 'People' },
     { id: 'system', label: 'System' },
   ];
@@ -63,6 +67,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       <main className="admin-main">
         {tab === 'claims' && <ClaimsTab claims={claims} reload={reloadClaims} toast={toast} />}
         {tab === 'sessions' && <SessionsTab toast={toast} />}
+        {tab === 'gates' && <GatesTab toast={toast} />}
+        {tab === 'photos' && <PhotosTab toast={toast} />}
         {tab === 'people' && <PeopleTab toast={toast} />}
         {tab === 'system' && <SystemTab toast={toast} />}
       </main>

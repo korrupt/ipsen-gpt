@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the image on this machine (the droplet only has 4 GB RAM), ships it
-# over SSH (no registry needed), syncs compose + persona, and restarts the app.
+# over SSH (no registry needed), syncs compose + persona + gates, and restarts the app.
 #
 #   usage: deploy/deploy.sh [user@droplet-ip] [--skip-checks]
 #
@@ -51,9 +51,9 @@ docker build --platform linux/amd64 -q -t "ipsengpt:$TAG" . >/dev/null
 log "ship: image -> $TARGET"
 docker save "ipsengpt:$TAG" | gzip -1 | remote 'gunzip | docker load' >/dev/null
 
-log "sync: compose file and persona"
+log "sync: compose file, persona and gates"
 rsync -a deploy/docker-compose.yml "$TARGET:$REMOTE_DIR/docker-compose.yml"
-rsync -a content/persona.md "$TARGET:$REMOTE_DIR/content/persona.md"
+rsync -a content/persona.md content/gates.json "$TARGET:$REMOTE_DIR/content/"
 
 PREVIOUS=$(remote "grep -oP '^IPSENGPT_TAG=\K.*' $REMOTE_DIR/.env || true")
 log "start: $PREVIOUS -> $TAG"

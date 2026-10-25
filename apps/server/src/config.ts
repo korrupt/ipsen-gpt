@@ -37,6 +37,13 @@ const ConfigSchema = z.object({
 
   DB_PATH: z.string().default('data/ipsengpt.sqlite'),
   PEOPLE_DIR: z.string().default('data/people'),
+  GATES_PATH: z.string().default('content/gates.json'),
+  PHOTOS_DIR: z.string().default('data/photos'),
+
+  /** A photo passes only if the model says yes with at least this confidence. */
+  PHOTO_CONFIDENCE_MIN: z.coerce.number().min(0).max(1).default(0.7),
+  PHOTO_VERIFY_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
+  PHOTO_MAX_ORIGINAL_MB: z.coerce.number().positive().max(24).default(20),
 
   ADMIN_PASSWORD: z
     .string()
@@ -49,6 +56,8 @@ const ConfigSchema = z.object({
   RATE_CHAT_IP: RateLimit.prefault('120/60'),
   RATE_SESSION_CREATE_IP: RateLimit.prefault('30/600'),
   RATE_ADMIN_LOGIN_IP: RateLimit.prefault('5/900'),
+  RATE_PHOTO_SESSION: RateLimit.prefault('1/15'),
+  RATE_PHOTO_IP: RateLimit.prefault('60/60'),
 });
 
 export interface RateLimitRule {
@@ -85,6 +94,13 @@ export interface Config {
   /** SQLite file, or ':memory:'. */
   dbPath: string;
   peopleDir: string;
+  gatesPath: string;
+  photos: {
+    dir: string;
+    confidenceMin: number;
+    verifyTimeoutMs: number;
+    maxOriginalBytes: number;
+  };
   admin: {
     /** Admin is disabled when unset. */
     password: string | null;
@@ -96,6 +112,8 @@ export interface Config {
     chatPerIp: RateLimitRule;
     sessionCreatePerIp: RateLimitRule;
     adminLoginPerIp: RateLimitRule;
+    photoPerSession: RateLimitRule;
+    photoPerIp: RateLimitRule;
   };
 }
 
@@ -161,6 +179,13 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
     webDist: resolve(e.WEB_DIST),
     dbPath: e.DB_PATH === ':memory:' ? e.DB_PATH : resolve(e.DB_PATH),
     peopleDir: resolve(e.PEOPLE_DIR),
+    gatesPath: resolve(e.GATES_PATH),
+    photos: {
+      dir: resolve(e.PHOTOS_DIR),
+      confidenceMin: e.PHOTO_CONFIDENCE_MIN,
+      verifyTimeoutMs: e.PHOTO_VERIFY_TIMEOUT_MS,
+      maxOriginalBytes: Math.round(e.PHOTO_MAX_ORIGINAL_MB * 1024 * 1024),
+    },
     admin: {
       password: e.ADMIN_PASSWORD || null,
       cookieSecure: e.ADMIN_COOKIE_SECURE,
@@ -171,6 +196,8 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
       chatPerIp: e.RATE_CHAT_IP,
       sessionCreatePerIp: e.RATE_SESSION_CREATE_IP,
       adminLoginPerIp: e.RATE_ADMIN_LOGIN_IP,
+      photoPerSession: e.RATE_PHOTO_SESSION,
+      photoPerIp: e.RATE_PHOTO_IP,
     },
   };
 }
