@@ -7,6 +7,7 @@ describe('parseConfig', () => {
     const c = parseConfig({}, '/base');
     expect(c.ollama.numCtx).toBe(4096);
     expect(c.ollama.connectTimeoutMs).toBe(3000);
+    expect(c.ollama.firstTokenTimeoutMs).toBe(15000);
     expect(c.chat.maxInputChars).toBe(500);
     expect(c.chat.historyTurns).toBe(8);
     expect(c.sseHeartbeatMs).toBe(20000);

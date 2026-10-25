@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { startMockOllama, type MockOllama } from '../src/dev/mock-ollama.js';
+import { startBlackhole, startMockOllama, type MockOllama } from '../src/dev/mock-ollama.js';
 import { OllamaError, streamChat, type ChatMessage } from '../src/ollama.js';
 import { makeConfig } from './helpers.js';
 
@@ -52,11 +52,43 @@ describe('streamChat', () => {
     });
   });
 
-  it('fails with connect_timeout when Ollama does not answer in time', async () => {
+  it('fails fast with connect_timeout when the machine accepts connections but is dead', async () => {
+    const dead = await startBlackhole();
+    const t0 = Date.now();
+    await expectKind(
+      collect(streamChat(cfg({ OLLAMA_URL: dead.url, OLLAMA_CONNECT_TIMEOUT_MS: '200', OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '5000' }), msgs)),
+      'connect_timeout',
+    );
+    expect(Date.now() - t0).toBeLessThan(1000); // the health check, not the 5 s first-token limit
+    await dead.close();
+  });
+
+  it('waits past the connect timeout for a busy but alive Ollama', async () => {
+    mock.setMode({ kind: 'delay', ms: 600, text: 'Sorry, busy.' });
+    const out = await collect(
+      streamChat(cfg({ OLLAMA_CONNECT_TIMEOUT_MS: '200', OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '3000' }), msgs),
+    );
+    expect(out).toBe('Sorry, busy.');
+  });
+
+  it('fails with first_token_timeout when Ollama is alive but never starts replying', async () => {
     mock.setMode({ kind: 'hang' });
     const t0 = Date.now();
-    await expectKind(collect(streamChat(cfg({ OLLAMA_CONNECT_TIMEOUT_MS: '200' }), msgs)), 'connect_timeout');
-    expect(Date.now() - t0).toBeLessThan(1500);
+    await expectKind(
+      collect(streamChat(cfg({ OLLAMA_CONNECT_TIMEOUT_MS: '100', OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '500' }), msgs)),
+      'first_token_timeout',
+    );
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(450);
+    expect(elapsed).toBeLessThan(1500);
+  });
+
+  it('the first-token limit does not cut off a reply that has started', async () => {
+    mock.setMode({ kind: 'reply', text: Array.from({ length: 40 }, (_, i) => `w${i}`).join(' ') });
+    const slow = await startMockOllama({ tokenDelayMs: 20, mode: { kind: 'reply', text: Array.from({ length: 40 }, (_, i) => `w${i}`).join(' ') } });
+    const out = await collect(streamChat(cfg({ OLLAMA_URL: slow.url, OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '300' }), msgs));
+    expect(out.split(' ')).toHaveLength(40); // ~800 ms total, well past 300 ms
+    await slow.close();
   });
 
   it('fails with unreachable when nothing listens', async () => {

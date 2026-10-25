@@ -187,7 +187,7 @@ describe('POST /api/chat', () => {
     ['stream_error', { kind: 'stream_error' as const }],
     ['truncate', { kind: 'truncate' as const }],
   ])('sends a generic in-character error event on %s', async (_name, mode) => {
-    const e = env({ OLLAMA_CONNECT_TIMEOUT_MS: '200' });
+    const e = env({ OLLAMA_CONNECT_TIMEOUT_MS: '200', OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '300' });
     const { token } = await newGuest(e, 'Kari');
     mock.setMode(mode);
     const res = await chat(e, token, 'hi');

@@ -18,10 +18,11 @@ const ConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
   OLLAMA_URL: z.url().default('http://127.0.0.1:11434'),
-  OLLAMA_MODEL: z.string().min(1).default('qwen3-vl:8b'),
+  OLLAMA_MODEL: z.string().min(1).default('qwen3-vl:4b-instruct'),
   OLLAMA_NUM_CTX: z.coerce.number().int().positive().default(4096),
   OLLAMA_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.8),
   OLLAMA_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
+  OLLAMA_FIRST_TOKEN_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
   OLLAMA_REPLY_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   OLLAMA_FALLBACK_URL: z.union([z.literal(''), z.url()]).default(''),
   OLLAMA_FALLBACK_MODEL: z.string().min(1).default('llama3.2:1b'),
@@ -64,7 +65,10 @@ export interface Config {
     model: string;
     numCtx: number;
     temperature: number;
+    /** Give up if Ollama doesn't even answer a health check within this. */
     connectTimeoutMs: number;
+    /** Give up if Ollama is alive but sends no first token within this (busy/queued). */
+    firstTokenTimeoutMs: number;
     replyTimeoutMs: number;
     /** Used when the primary fails before replying. Null = no fallback. */
     fallback: { url: string; model: string } | null;
@@ -141,6 +145,7 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
       numCtx: e.OLLAMA_NUM_CTX,
       temperature: e.OLLAMA_TEMPERATURE,
       connectTimeoutMs: e.OLLAMA_CONNECT_TIMEOUT_MS,
+      firstTokenTimeoutMs: e.OLLAMA_FIRST_TOKEN_TIMEOUT_MS,
       replyTimeoutMs: e.OLLAMA_REPLY_TIMEOUT_MS,
       fallback: e.OLLAMA_FALLBACK_URL
         ? { url: e.OLLAMA_FALLBACK_URL.replace(/\/+$/, ''), model: e.OLLAMA_FALLBACK_MODEL }

@@ -5,10 +5,20 @@ export interface ChatMessage {
   content: string;
 }
 
+export type OllamaErrorKind =
+  /** Nothing answered, not even a health check: the machine is gone (e.g. PC asleep, tunnel hanging). */
+  | 'connect_timeout'
+  /** Ollama is up but produced no first token in time (busy or queued). */
+  | 'first_token_timeout'
+  | 'unreachable'
+  | 'http'
+  | 'stream'
+  | 'aborted';
+
 export class OllamaError extends Error {
   constructor(
     message: string,
-    readonly kind: 'connect_timeout' | 'unreachable' | 'http' | 'stream' | 'aborted',
+    readonly kind: OllamaErrorKind,
   ) {
     super(message);
     this.name = 'OllamaError';
@@ -22,10 +32,32 @@ interface ChatChunk {
 }
 
 /**
+ * Whether anything answers GET /api/version within `timeoutMs` (Ollama does,
+ * even while busy generating). Only "silent" means dead: a refused or failed
+ * check is left for the chat request itself to report.
+ */
+async function healthCheck(url: string, timeoutMs: number, signal: AbortSignal): Promise<'answered' | 'silent' | 'error'> {
+  const timer = AbortSignal.timeout(timeoutMs);
+  try {
+    const res = await fetch(`${url}/api/version`, { signal: AbortSignal.any([signal, timer]) });
+    await res.body?.cancel();
+    return 'answered';
+  } catch {
+    return timer.aborted ? 'silent' : 'error';
+  }
+}
+
+const isAbortError = (err: unknown) => err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+
+/**
  * Streams an assistant reply from Ollama's /api/chat, yielding content deltas.
  *
- * Fails with `connect_timeout` if no response headers arrive within
- * `connectTimeoutMs`, so the caller can switch to a fallback model.
+ * Ollama only answers once the first token is ready, so a slow start can mean
+ * "busy" or "dead". A health check sent alongside the request tells them apart:
+ *  - refused connection                                  -> `unreachable` (immediately)
+ *  - health check silent for connectTimeoutMs            -> `connect_timeout`
+ *  - alive, but no first token within firstTokenTimeoutMs -> `first_token_timeout`
+ * All of these happen before any output, so the caller can switch to a fallback.
  */
 export async function* streamChat(
   cfg: Config['ollama'],
@@ -36,22 +68,40 @@ export async function* streamChat(
   const onAbort = () => controller.abort();
   signal?.addEventListener('abort', onAbort, { once: true });
 
-  let phase: 'connecting' | 'streaming' = 'connecting';
-  const connectTimer = setTimeout(() => controller.abort(), cfg.connectTimeoutMs);
-  const replyTimer = setTimeout(() => controller.abort(), cfg.replyTimeoutMs);
+  /** True until the first token (or an empty but complete reply) arrives. */
+  let waiting = true;
+  let timedOut: 'dead' | 'slow' | 'reply' | null = null;
+  const timeout = (reason: NonNullable<typeof timedOut>) => {
+    timedOut ??= reason;
+    controller.abort();
+  };
+
+  void healthCheck(cfg.url, cfg.connectTimeoutMs, controller.signal).then((result) => {
+    if (result === 'silent' && waiting) timeout('dead');
+  });
+  const firstTokenTimer = setTimeout(() => waiting && timeout('slow'), cfg.firstTokenTimeoutMs);
+  const replyTimer = setTimeout(() => timeout('reply'), cfg.replyTimeoutMs);
+  const gotFirstToken = () => {
+    waiting = false;
+    clearTimeout(firstTokenTimer);
+  };
 
   const fail = (err: unknown): never => {
     if (err instanceof OllamaError) throw err;
     if (signal?.aborted) throw new OllamaError('Request aborted by client', 'aborted');
-    if (controller.signal.aborted) {
-      throw phase === 'connecting'
-        ? new OllamaError(`No response from Ollama within ${cfg.connectTimeoutMs} ms`, 'connect_timeout')
-        : new OllamaError(`Reply exceeded ${cfg.replyTimeoutMs} ms`, 'stream');
+    if (isAbortError(err) && timedOut === 'dead') {
+      throw new OllamaError(`Ollama did not answer a health check within ${cfg.connectTimeoutMs} ms`, 'connect_timeout');
+    }
+    if (isAbortError(err) && timedOut === 'slow') {
+      throw new OllamaError(`Ollama is up but sent nothing within ${cfg.firstTokenTimeoutMs} ms`, 'first_token_timeout');
+    }
+    if (isAbortError(err) && timedOut === 'reply') {
+      throw new OllamaError(`Reply exceeded ${cfg.replyTimeoutMs} ms`, 'stream');
     }
     const msg = err instanceof Error ? err.message : String(err);
     throw new OllamaError(
-      phase === 'connecting' ? `Ollama unreachable: ${msg}` : `Stream failed: ${msg}`,
-      phase === 'connecting' ? 'unreachable' : 'stream',
+      waiting ? `Ollama unreachable: ${msg}` : `Stream failed: ${msg}`,
+      waiting ? 'unreachable' : 'stream',
     );
   };
 
@@ -73,8 +123,6 @@ export async function* streamChat(
     } catch (err) {
       return fail(err);
     }
-    clearTimeout(connectTimer);
-    phase = 'streaming';
 
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
@@ -94,6 +142,7 @@ export async function* streamChat(
           const chunk = JSON.parse(line) as ChatChunk;
           if (chunk.error) throw new OllamaError(`Ollama error: ${chunk.error}`, 'stream');
           const delta = chunk.message?.content;
+          if (delta || chunk.done) gotFirstToken();
           if (delta) yield delta;
           if (chunk.done) return;
         }
@@ -103,7 +152,8 @@ export async function* streamChat(
     }
     throw new OllamaError('Stream ended before completion', 'stream');
   } finally {
-    clearTimeout(connectTimer);
+    waiting = false;
+    clearTimeout(firstTokenTimer);
     clearTimeout(replyTimer);
     signal?.removeEventListener('abort', onAbort);
     controller.abort();

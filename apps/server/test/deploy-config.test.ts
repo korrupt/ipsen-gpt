@@ -69,6 +69,7 @@ describe('env.production.example', () => {
     expect(c.ollama.url).toBe('http://127.0.0.1:11435');
     expect(c.ollama.fallback?.url).toBe('http://127.0.0.1:11434');
     expect(c.ollama.connectTimeoutMs).toBe(3000);
+    expect(c.ollama.firstTokenTimeoutMs).toBe(15000);
     expect(c.admin.cookieSecure).toBe(true);
   });
 });

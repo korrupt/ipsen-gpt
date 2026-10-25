@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Installs Ollama as a systemd service on the PC (native Ubuntu, or WSL2 with
 # systemd enabled), keeps the model loaded forever, and pulls the model.
-#   usage: deploy/pc/setup-ollama.sh [model]   (default qwen3-vl:8b)
+#   usage: deploy/pc/setup-ollama.sh [model]   (default qwen3-vl:4b-instruct)
 set -euo pipefail
 
-MODEL=${1:-qwen3-vl:8b}
+MODEL=${1:-qwen3-vl:4b-instruct}
 
 if grep -qi microsoft /proc/version 2>/dev/null; then
   echo "WSL detected."

@@ -24,6 +24,7 @@ export function makeConfig(overrides: Record<string, string> = {}): Config {
       PEOPLE_DIR: 'people',
       ADMIN_PASSWORD,
       OLLAMA_CONNECT_TIMEOUT_MS: '500',
+      OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '1500',
       OLLAMA_REPLY_TIMEOUT_MS: '5000',
       ...overrides,
     },

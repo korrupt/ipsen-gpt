@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { startMockOllama, type MockOllama } from '../src/dev/mock-ollama.js';
+import { startBlackhole, startMockOllama, type MockOllama } from '../src/dev/mock-ollama.js';
 import { probe, type Backend } from '../src/llm.js';
 import type { ChatMessage } from '../src/ollama.js';
 import { createServices } from '../src/services.js';
@@ -35,6 +35,7 @@ const env = (o: Record<string, string> = {}) =>
     OLLAMA_FALLBACK_URL: fallback.url,
     OLLAMA_FALLBACK_MODEL: 'small:1b',
     OLLAMA_CONNECT_TIMEOUT_MS: '200',
+    OLLAMA_FIRST_TOKEN_TIMEOUT_MS: '800',
     OLLAMA_PRIMARY_RETRY_MS: '30000',
     ...o,
   });
@@ -63,12 +64,30 @@ describe('primary/fallback switching', () => {
     expect(e.logged).toContain('Primary model failed, using fallback');
   });
 
-  it('falls back when the primary does not answer within the connect timeout (~3 s in prod)', async () => {
+  it('falls back fast when the PC is dead but the tunnel still accepts connections', async () => {
+    const dead = await startBlackhole();
+    const e = env({ OLLAMA_URL: dead.url });
+    const t0 = Date.now();
+    expect((await ask(e)).backend).toBe('fallback');
+    expect(Date.now() - t0).toBeLessThan(700); // health check (200 ms), not the first-token limit
+    expect(e.logged).toContain('Primary model failed, using fallback');
+    await dead.close();
+  });
+
+  it('keeps a busy PC: no fallback while it is alive and answers within the first-token limit', async () => {
+    const e = env();
+    primary.setMode({ kind: 'delay', ms: 500, text: 'slow but primary' }); // > 200 ms connect timeout
+    expect(await ask(e)).toEqual({ text: 'slow but primary', backend: 'primary' });
+    expect(fallback.requests).toHaveLength(0);
+  });
+
+  it('falls back when the PC is alive but too busy to start within the first-token limit', async () => {
     const e = env();
     primary.setMode({ kind: 'hang' });
     const t0 = Date.now();
     expect((await ask(e)).backend).toBe('fallback');
-    expect(Date.now() - t0).toBeLessThan(1500);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(750);
+    expect(e.services.errors.recent()[0]?.detail).toMatch(/up but sent nothing within 800 ms/);
   });
 
   it('falls back on primary HTTP errors (e.g. model not pulled)', async () => {

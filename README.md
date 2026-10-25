@@ -61,8 +61,14 @@ guest phone ──HTTPS──▶ Cloudflare ──HTTPS──▶ droplet: Nginx 
                                                                   └─ fallback 127.0.0.1:11434 ─ ollama container
 ```
 
-The app uses the PC's model and falls back to the droplet's small model when the PC doesn't answer
-within 3 s. It then skips the PC for `OLLAMA_PRIMARY_RETRY_MS` (30 s) before trying it again.
+The app uses the PC's model and falls back to the droplet's small model when the PC can't answer:
+- **PC unreachable** (tunnel down, Ollama stopped): fallback immediately.
+- **PC dead but tunnel still up** (asleep or hung): a health check sent with each request gets no
+  answer, so the app falls back after `OLLAMA_CONNECT_TIMEOUT_MS` (3 s).
+- **PC alive but busy** (queued guests): the app keeps waiting for up to `OLLAMA_FIRST_TOKEN_TIMEOUT_MS`
+  (15 s), then falls back.
+
+After any failure it skips the PC for `OLLAMA_PRIMARY_RETRY_MS` (30 s) before trying it again.
 Admin → System shows both models, lets you force the fallback, and lists recent errors.
 
 | File | Runs on | Purpose |
@@ -93,7 +99,7 @@ WSL2 only:
 
 Both:
 ```bash
-deploy/pc/setup-ollama.sh qwen3-vl:8b
+deploy/pc/setup-ollama.sh qwen3-vl:4b-instruct
 ```
 ```bash
 ssh-keygen -t ed25519 -N '' -C ipsengpt-tunnel -f ~/.ssh/ipsengpt_tunnel
@@ -101,8 +107,10 @@ ssh-keygen -t ed25519 -N '' -C ipsengpt-tunnel -f ~/.ssh/ipsengpt_tunnel
 ```bash
 mkdir -p ~/.config/ipsengpt && echo 'TUNNEL_HOST=<droplet-ip>' > ~/.config/ipsengpt/tunnel.env
 ```
-Check the model tag on ollama.com/library first. With 8 GB of VRAM, an 8B vision model is tight;
-`qwen3-vl:4b` or `gemma3:4b` are smaller options, and the photo gates in Phase 4 need a vision model.
+Note it's `qwen3-vl` with a lowercase L ("vision-language"). On the 8 GB RTX 2000 laptop,
+`qwen3-vl:8b` only partly fits on the GPU: 21.7 tokens/s and slow prompt reading. `qwen3-vl:4b` runs
+entirely on the GPU at 53.6 tokens/s. With 12 GB of VRAM or more, the 8b is an option. Check
+`ollama ps`: you want `100% GPU`.
 
 ### 2. Droplet: one-time setup (as root, fresh Ubuntu 24.04)
 
@@ -155,8 +163,8 @@ ssh <you>@<droplet-ip> 'sudo ss -ltnp | grep -v 127.0.0. ; sudo ufw status'
 1. The health check returns `{"ok":true}`. The only public listeners are sshd (22) and Nginx (80/443). Ports 3000, 11434 and 11435 appear only on 127.0.0.1.
 2. Start `deploy/pc/tunnel.sh`, open the site, and chat. Admin → System shows **Primary: Ready**.
 3. A reply streams word by word through Cloudflare. If it arrives all at once, something buffers SSE.
-4. Stop the tunnel (Ctrl-C) and chat again: you get a reply from the fallback (small model) after at
-   most about 3 s, and System shows it answering. Restart the tunnel; within 30 s the primary is used again.
+4. Stop the tunnel (Ctrl-C) and chat again: you get a reply from the fallback (small model) right away,
+   and System shows it answering. Restart the tunnel; within 30 s the primary is used again.
 5. In Admin → Sessions, a guest's last-seen is correct and rate limits are per guest: each phone has its
    own IP in the app, not Cloudflare's.
 

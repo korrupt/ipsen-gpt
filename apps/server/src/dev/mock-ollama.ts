@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 
 /**
@@ -7,8 +8,10 @@ import type { AddressInfo } from 'node:net';
  */
 export type MockMode =
   | { kind: 'reply'; text?: string }
-  /** Hang without sending headers (to exercise the connect timeout). */
+  /** Alive (health checks answer) but /api/chat never responds: a busy or stuck model. */
   | { kind: 'hang' }
+  /** Alive, and replies after `ms`: a busy model that eventually answers. */
+  | { kind: 'delay'; ms: number; text?: string }
   /** Respond with an HTTP error. */
   | { kind: 'http_error'; status: number }
   /** Stream a few tokens, then an `{"error": ...}` chunk. */
@@ -80,6 +83,7 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
 
     const current = mode;
     if (current.kind === 'hang') return; // never respond
+    if (current.kind === 'delay') await sleep(current.ms);
     if (current.kind === 'http_error') {
       res.statusCode = current.status;
       res.setHeader('content-type', 'application/json');
@@ -89,11 +93,11 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
 
     res.setHeader('content-type', 'application/x-ndjson');
     const text =
-      current.kind === 'reply' && current.text !== undefined
+      (current.kind === 'reply' || current.kind === 'delay') && current.text !== undefined
         ? current.text
         : CANNED_REPLIES[replyIndex++ % CANNED_REPLIES.length]!;
     let tokens = tokenize(text);
-    if (current.kind !== 'reply') tokens = tokens.slice(0, 3);
+    if (current.kind === 'stream_error' || current.kind === 'truncate') tokens = tokens.slice(0, 3);
 
     let aborted = false;
     res.on('close', () => {
@@ -141,6 +145,27 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
     setMode(m) {
       mode = m;
     },
+    close() {
+      for (const s of sockets) s.destroy();
+      return new Promise((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+/**
+ * A machine that accepts TCP connections and never answers: what the droplet
+ * sees when the tunnel is still up but the PC is asleep or hung.
+ */
+export async function startBlackhole(): Promise<{ url: string; close(): Promise<void> }> {
+  const sockets = new Set<import('node:net').Socket>();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
     close() {
       for (const s of sockets) s.destroy();
       return new Promise((resolve) => server.close(() => resolve()));
