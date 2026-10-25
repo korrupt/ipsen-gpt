@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { startBlackhole, startMockOllama, type MockOllama } from '../src/dev/mock-ollama.js';
 import { OllamaError, streamChat, type ChatMessage } from '../src/ollama.js';
-import { makeConfig } from './helpers.js';
+import { makeConfig, refusedUrl } from './helpers.js';
 
 let mock: MockOllama;
 const msgs: ChatMessage[] = [
@@ -92,7 +92,7 @@ describe('streamChat', () => {
   });
 
   it('fails with unreachable when nothing listens', async () => {
-    await expectKind(collect(streamChat(cfg({ OLLAMA_URL: 'http://127.0.0.1:1' }), msgs)), 'unreachable');
+    await expectKind(collect(streamChat(cfg({ OLLAMA_URL: await refusedUrl() }), msgs)), 'unreachable');
   });
 
   it('fails with http on a non-2xx response', async () => {

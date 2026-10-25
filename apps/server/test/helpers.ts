@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
@@ -11,6 +12,20 @@ export const ADMIN_PASSWORD = 'correct-horse';
 
 export function tempDir(prefix = 'ipsengpt-test-'): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+/**
+ * A URL whose port refuses connections: bind a free port, then release it.
+ * Not 127.0.0.1: WSL2's mirrored networking drops connections to closed ports
+ * there instead of refusing them. Not ports like 1 or 9 either: fetch blocks
+ * those itself, so no connection would be attempted at all.
+ */
+export async function refusedUrl(): Promise<string> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.2', resolve));
+  const { port } = server.address() as net.AddressInfo;
+  await new Promise((resolve) => server.close(resolve));
+  return `http://127.0.0.2:${port}`;
 }
 
 export function makeConfig(overrides: Record<string, string> = {}): Config {

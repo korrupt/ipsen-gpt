@@ -146,6 +146,11 @@ deploy/                           compose, env template, deploy.sh, droplet/ (se
 - SVG comments can't contain `--`; browsers then refuse to render the file (`apps/web/src/assets.test.ts` guards this).
 - Testing Library's `waitFor` uses faked timers too: with `vi.useFakeTimers`, advance time in a plain
   loop (see `afterPolling` in `App.test.tsx`).
+- WSL2 `networkingMode=Mirrored` (this PC's setup): connecting to a closed port on `127.0.0.1` **hangs**
+  instead of being refused; `127.0.0.2`, `::1` and the LAN IP still refuse. Also, `fetch` refuses
+  "bad ports" (1, 9, ...) itself without connecting. Tests that need a refused connection use
+  `refusedUrl()` in `apps/server/test/helpers.ts`. At runtime this only means a dead Ollama behind the
+  tunnel falls back after the 3 s health check instead of at once.
 - Verify that tests actually bite: several deploy tests passed for the wrong reason (header-only
   timing, `timeout` exit codes, case-sensitive header checks) until mutation-checked. When adding a
   safety test, temporarily break the code and confirm the test fails.

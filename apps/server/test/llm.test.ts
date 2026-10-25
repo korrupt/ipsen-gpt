@@ -6,16 +6,19 @@ import { startBlackhole, startMockOllama, type MockOllama } from '../src/dev/moc
 import { probe, type Backend } from '../src/llm.js';
 import type { ChatMessage } from '../src/ollama.js';
 import { createServices } from '../src/services.js';
-import { adminCookie, makeConfig, makeEnv, newGuest, parseSse, tempDir, tokenText, type TestEnv } from './helpers.js';
+import { adminCookie, makeConfig, makeEnv, newGuest, parseSse, refusedUrl, tempDir, tokenText, type TestEnv } from './helpers.js';
 
 let primary: MockOllama;
 let fallback: MockOllama;
 const msgs: ChatMessage[] = [{ role: 'user', content: 'hi' }];
-const DEAD_URL = 'http://127.0.0.1:1';
+let DEAD_URL: string;
+let DEAD_URL_2: string;
 
 beforeAll(async () => {
   primary = await startMockOllama({ tokenDelayMs: 1 });
   fallback = await startMockOllama({ tokenDelayMs: 1 });
+  DEAD_URL = await refusedUrl();
+  DEAD_URL_2 = await refusedUrl();
 });
 afterAll(async () => {
   await primary.close();
@@ -136,7 +139,7 @@ describe('primary/fallback switching', () => {
   });
 
   it('fails when both models are down', async () => {
-    const e = env({ OLLAMA_URL: DEAD_URL, OLLAMA_FALLBACK_URL: 'http://127.0.0.1:2' });
+    const e = env({ OLLAMA_URL: DEAD_URL, OLLAMA_FALLBACK_URL: DEAD_URL_2 });
     expect(await failure(ask(e))).toMatchObject({ kind: 'unreachable' });
   });
 
