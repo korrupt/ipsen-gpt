@@ -35,6 +35,9 @@ Environment="OLLAMA_KEEP_ALIVE=-1"
 Environment="OLLAMA_HOST=127.0.0.1:11434"
 Environment="OLLAMA_NUM_PARALLEL=2"
 Environment="OLLAMA_MAX_LOADED_MODELS=1"
+# Must match the app's OLLAMA_NUM_CTX: a request with a different context size
+# makes Ollama reload the model (seconds), and bigger GPUs default to more than 4096.
+Environment="OLLAMA_CONTEXT_LENGTH=4096"
 CONF
 sudo systemctl daemon-reload
 sudo systemctl enable --now ollama
@@ -46,4 +49,5 @@ ollama pull "$MODEL"
 echo "Warming up..."
 curl -sf http://127.0.0.1:11434/api/chat -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Say boo.\"}],\"stream\":false,\"think\":false}" >/dev/null
 ollama ps
+echo "Check: PROCESSOR should be 100% GPU and CONTEXT 4096 (same as OLLAMA_NUM_CTX on the droplet)."
 echo "Done. Next: deploy/pc/tunnel.sh"
