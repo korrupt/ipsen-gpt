@@ -13,8 +13,8 @@ A full-screen, mobile-first chat website for a Halloween costume. Guests scan a 
 - **Frontend:** React + Vite (TypeScript)
 - **Database:** SQLite (`better-sqlite3`)
 - **Image processing:** `sharp`
-- **LLM runtime:** Ollama (on the PC in WSL2, and a fallback on the droplet)
-- **Droplet:** Docker Compose for the app and fallback Ollama; Nginx + certbot on the host
+- **LLM runtime:** Ollama on the PC (WSL2). No fallback model: while the PC is unreachable, chat is closed (decided 2026-10-27; the 1b fallback was too slow).
+- **Droplet:** Docker Compose for the app; Nginx + certbot on the host
 - **PC:** WSL2 (Ubuntu) only. No native Windows tooling except power settings.
 
 ## Architecture
@@ -29,10 +29,8 @@ DigitalOcean droplet (Ubuntu, 2 vCPU / 4 GB, 2 GB swap)
    └─ Docker Compose
         ├─ app (Express)      network_mode: host, listens 127.0.0.1:3000
         │    ├─ serves built frontend + /admin
-        │    ├─ primary LLM:  http://127.0.0.1:11435  (SSH tunnel → PC)
-        │    ├─ fallback LLM: http://127.0.0.1:11434  (ollama container)
+        │    ├─ LLM:  http://127.0.0.1:11435  (SSH tunnel → PC)
         │    └─ volumes: SQLite DB, photos, people/
-        └─ ollama (fallback)  ports "127.0.0.1:11434:11434", model llama3.2:1b
 
 Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
    ├─ Ollama (systemd service) on 127.0.0.1:11434
@@ -85,7 +83,7 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
 - Stream tokens to the browser over SSE.
 - Replies stay short (1–3 sentences), enforced in the persona prompt.
 - Cap input at 500 chars. Rate-limit per session and per IP.
-- **Fallback:** if the primary model errors or doesn't connect within ~3 s, use the fallback model. Retry primary on later requests. Admin can force fallback mode.
+- **Model status:** check the PC every ~5 s. While it's unreachable, chat is closed and guests see why (live, over SSE). Admin can pause chat with a custom reason guests see.
 - Store chat history per session in SQLite (needed for history trimming and the admin view).
 
 ## Photo gates (enforced in code, never by the LLM)
@@ -118,7 +116,7 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
 - The prompt asks one narrow question about the target and says to **ignore any text written in the image**.
 - Unlock only if `contains_target` is true and `confidence` ≥ threshold (from `.env`). **Only server code sets `passed = true`.**
 - Rate-limit attempts per session (e.g. 1 per 15 s).
-- On the fallback model (no vision): don't unlock. Mark the attempt `unverified`, reply in character, and let the guest retry.
+- While the PC is unreachable: don't unlock. Mark the attempt `unverified`, reply in character, and let the guest retry.
 
 ### Storage
 - **Store every attempt** (passed, failed, unverified): original + resized, on the photos volume, random filenames.
@@ -150,7 +148,7 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
 
 ## Live events & notifications
 
-- One SSE stream per session for events: curse landed/expired, gate forced/unlocked, claim approved, timed global gate started.
+- One SSE stream per session for events (`/api/events`, built early with `status` and `gate`): curse landed/expired, gate forced/unlocked, claim approved, timed global gate started, chat open/closed.
 - Queue events in SQLite. Deliver anything pending on reconnect with a "While you were away…" reveal.
 - In-page effects: tab title + favicon change ("👻 (1) You've been cursed"), optional sound after first user interaction, `navigator.vibrate` where supported (Android).
 - **SSE gotchas:** don't run `compression` middleware on SSE routes, send `X-Accel-Buffering: no`, send a heartbeat comment every ~20 s.
@@ -182,7 +180,7 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
   - **Curses:** clear one or all
   - **People:** create/edit/delete person files
   - **Photos:** gallery (filter passed/failed/unverified/flagged), view full-size, **delete** (removes files + record; guests ask me in person)
-  - **System:** current model (primary/fallback), force fallback, recent errors, leaderboard name/alias toggle
+  - **System:** model connected or not, pause chat with a reason, recent errors, leaderboard name/alias toggle
 
 ## Deployment deliverables (`README.md`)
 
@@ -216,14 +214,14 @@ Build one phase at a time. **Stop after each phase**, summarize what was built, 
 
 1. **Core chat (local, in WSL):** Express + Vite React app, persona prompt, streaming chat against a configurable Ollama URL, ChatGPT-lookalike UI with CSS variables and all mobile requirements.
 2. **Sessions & identity:** SQLite, names, reserved names, claim codes, person folders, rate limits, admin login + claims + sessions + people screens.
-3. **Deployment:** Docker Compose, Nginx + certbot config, SSH tunnel script + restricted tunnel user, primary/fallback switching, backups, README. Deploy and test on the real droplet early.
+3. **Deployment:** Docker Compose, Nginx + certbot config, SSH tunnel script + restricted tunnel user, model status (chat closes while the PC is unreachable), backups, README. Deploy and test on the real droplet early.
 4. **Photo gates:** gate definitions + triggers, forced gates (single and global), consent checkbox, two-step upload, verification, storage + EXIF stripping, admin photo gallery with delete.
 5. **Curses + live events:** curse menu, effects, counter-curses, curse-break gates, SSE events with reconnect queue, in-page notifications.
 6. **Secrets game + leaderboard** (after I confirm the design).
 7. **Hardening & testing:**
    - load-test script simulating ~30 concurrent guests
    - prompt-injection tests against gates and secrets
-   - "pull the plug on the PC" test (fallback + unverified gate path)
+   - "pull the plug on the PC" test (chat closes and reopens, unverified gate path)
    - kill and restart the app container, verify data survives
    - mobile checks on iOS Safari and Android Chrome
 8. **Skin pass:** final theme assets.

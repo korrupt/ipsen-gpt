@@ -55,11 +55,9 @@ describe('docker-compose.yml', () => {
     expect(compose.services.app?.volumes).toContain('./content:/app/content:ro');
   });
 
-  it('pins the fallback Ollama image and keeps its model loaded', () => {
-    const ollama = compose.services.ollama!;
-    expect(ollama.image).toMatch(/^ollama\/ollama:\d+\.\d+\.\d+$/);
-    expect(ollama.environment?.OLLAMA_KEEP_ALIVE).toBe('-1');
-    for (const svc of Object.values(compose.services)) expect(svc.restart).toBe('unless-stopped');
+  it('runs only the app (the model lives on the PC), restarting it after a crash or reboot', () => {
+    expect(Object.keys(compose.services)).toEqual(['app']);
+    expect(compose.services.app?.restart).toBe('unless-stopped');
   });
 });
 
@@ -71,12 +69,16 @@ describe('env.production.example', () => {
       .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
   );
 
+  it('has no fallback settings left', () => {
+    expect(Object.keys(env).filter((k) => /FALLBACK|PRIMARY_RETRY/.test(k))).toEqual([]);
+  });
+
   it('is a valid app config once ADMIN_PASSWORD is filled in', () => {
     const c = parseConfig({ ...env, ADMIN_PASSWORD: 'a-long-password' }, '/');
     expect(c.ollama.url).toBe('http://127.0.0.1:11435');
-    expect(c.ollama.fallback?.url).toBe('http://127.0.0.1:11434');
     expect(c.ollama.connectTimeoutMs).toBe(3000);
-    expect(c.ollama.firstTokenTimeoutMs).toBe(15000);
+    expect(c.ollama.firstTokenTimeoutMs).toBe(45000);
+    expect(c.ollama.checkIntervalMs).toBe(5000);
     expect(c.admin.cookieSecure).toBe(true);
     expect(c.photos.confidenceMin).toBe(0.7);
     expect(c.rateLimits.photoPerSession).toEqual({ count: 1, windowMs: 15_000 });

@@ -2,8 +2,9 @@ import { AdminAuth } from './admin/auth.js';
 import type { Config } from './config.js';
 import { openDb, type Db } from './db.js';
 import { ErrorLog } from './errorLog.js';
+import { EventHub } from './events.js';
 import { loadGateDefs, type GateDefSet } from './gateDefs.js';
-import { GateStore } from './gates.js';
+import { GateStore, gateView } from './gates.js';
 import { Llm } from './llm.js';
 import { PeopleStore } from './people.js';
 import { PhotoStore } from './photos.js';
@@ -23,6 +24,8 @@ export interface Services {
   limiter: RateLimiter;
   settings: Settings;
   llm: Llm;
+  /** Live events to guests' open /api/events streams. */
+  events: EventHub;
   errors: ErrorLog;
   /** Logs to stderr and keeps the entry for the admin System screen. */
   log: (msg: string, err?: unknown) => void;
@@ -54,6 +57,17 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     write(msg, err);
     errors.add(msg, err);
   };
+  const llm = new Llm(config.ollama, settings, log, now);
+  const events = new EventHub();
+  // Push changes to guests the moment they happen.
+  llm.onStatusChange = (status) => events.broadcast('status', status);
+  gates.onChange = (ids) => {
+    for (const id of ids) {
+      if (!events.isListening(id)) continue;
+      const g = gates.current(id);
+      events.toSession(id, 'gate', { gate: g ? gateView(g) : null });
+    }
+  };
   return {
     db,
     people,
@@ -64,7 +78,8 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     adminAuth: new AdminAuth(db, config.admin, now),
     limiter: new RateLimiter(now),
     settings,
-    llm: new Llm(config.ollama, settings, log, now),
+    llm,
+    events,
     errors,
     log,
     inFlight: new Set(),

@@ -11,7 +11,9 @@ import type { Services } from '../services.js';
 
 const PasswordBody = z.object({ password: z.string().max(500) });
 const AssignBody = z.object({ slug: z.string().min(1) });
-const ToggleBody = z.object({ enabled: z.boolean() });
+const PauseBody = z.object({
+  reason: z.string().trim().min(1, 'Write what guests should see while chat is paused.').max(300, 'Keep the reason under 300 characters.'),
+});
 const ForceBody = z
   .object({
     /** One session, or every live session with a name. */
@@ -34,7 +36,7 @@ const PersonBody = z.object({
 
 export function adminRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { adminAuth, sessions, people, limiter, llm, settings, errors, gates, gateDefs, photos } = services;
+  const { adminAuth, sessions, people, limiter, llm, settings, errors, gates, gateDefs, photos, events } = services;
 
   const personName = (slug: string | null) => (slug ? (people.get(slug)?.name ?? `${slug} (deleted)`) : null);
 
@@ -280,21 +282,24 @@ export function adminRouter(config: Config, services: Services): Router {
   // --- System ---------------------------------------------------------------
 
   router.get('/system', async (_req, res) => {
-    res.json({ llm: await llm.status(), errors: errors.recent() });
+    const model = await llm.check();
+    res.json({ model, status: llm.status(), pauseReason: settings.get('pauseReason'), listeners: events.connections, errors: errors.recent() });
   });
 
-  router.post('/system/force-fallback', (req, res) => {
-    const body = ToggleBody.safeParse(req.body);
+  /** Closes chat for everyone; guests see `reason`. */
+  router.put('/system/pause', (req, res) => {
+    const body = PauseBody.safeParse(req.body);
     if (!body.success) {
-      res.status(400).json({ error: 'Expected { enabled: boolean }' });
+      res.status(400).json({ error: body.error.issues[0]?.message ?? 'Invalid request' });
       return;
     }
-    if (body.data.enabled && !llm.hasFallback) {
-      res.status(409).json({ error: 'No fallback model is configured (OLLAMA_FALLBACK_URL).' });
-      return;
-    }
-    settings.set('forceFallback', body.data.enabled);
-    res.json({ forceFallback: body.data.enabled });
+    llm.pause(body.data.reason);
+    res.json({ pauseReason: body.data.reason, status: llm.status() });
+  });
+
+  router.delete('/system/pause', (_req, res) => {
+    llm.pause(null);
+    res.json({ pauseReason: null, status: llm.status() });
   });
 
   // --- People ---------------------------------------------------------------

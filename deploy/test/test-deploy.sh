@@ -6,7 +6,6 @@ source "$(dirname "$0")/lib.sh"
 WORK=$(mktemp -d)
 APP_PORT=$(free_port)
 PRIMARY_PORT=$(free_port)
-FALLBACK_PORT=$(free_port)
 PROJECT=ipsengpt-deploytest-$$
 PIDS=()
 cleanup() {
@@ -29,26 +28,18 @@ exec bash -c "$*"
 SH
 chmod +x "$WORK/bin/ssh"
 
-for spec in "$PRIMARY_PORT:PRIMARY-REPLY" "$FALLBACK_PORT:FALLBACK-REPLY"; do
-  MOCK_OLLAMA_PORT=${spec%%:*} MOCK_OLLAMA_REPLY=${spec#*:} \
-    "$REPO_ROOT/apps/server/node_modules/.bin/tsx" "$REPO_ROOT/apps/server/src/dev/mock-ollama-cli.ts" >/dev/null 2>&1 &
-  PIDS+=($!)
-done
+MOCK_OLLAMA_PORT=$PRIMARY_PORT MOCK_OLLAMA_REPLY=PRIMARY-REPLY \
+  "$REPO_ROOT/apps/server/node_modules/.bin/tsx" "$REPO_ROOT/apps/server/src/dev/mock-ollama-cli.ts" >/dev/null 2>&1 &
+PIDS+=($!)
 wait_for 15 curl -sf "http://127.0.0.1:$PRIMARY_PORT/api/version" || fail "mock did not start"
 
-cat > "$WORK/app/override.yml" <<'YML'
-services:
-  ollama:
-    profiles: [disabled]
-YML
 cat > "$WORK/app/.env" <<ENV
 COMPOSE_PROJECT_NAME=$PROJECT
-COMPOSE_FILE=docker-compose.yml:override.yml
 IPSENGPT_TAG=previous-tag
 APP_PORT=$APP_PORT
 DATA_ROOT=$WORK/data
 OLLAMA_URL=http://127.0.0.1:$PRIMARY_PORT
-OLLAMA_FALLBACK_URL=http://127.0.0.1:$FALLBACK_PORT
+OLLAMA_MODEL=mock
 ADMIN_PASSWORD=deploy-test-pw
 ENV
 
@@ -68,7 +59,7 @@ BASE="http://127.0.0.1:$APP_PORT"
 token=$(curl -sf -X POST "$BASE/api/session" -H 'content-type: application/json' -d '{"name":"Kari"}' \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 assert_contains "$(curl -sN -X POST "$BASE/api/chat" -H "authorization: Bearer $token" -H 'content-type: application/json' -d '{"message":"hi"}')" \
-  "PRIMARY-REPLY" "deployed app chats through the primary"
+  "PRIMARY-REPLY" "deployed app chats through the PC"
 
 step "Redeploy keeps data"
 out=$(deploy 2>&1) || fail "second deploy failed: $out"

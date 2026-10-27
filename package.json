@@ -8,13 +8,14 @@
   },
   "scripts": {
     "dev": "concurrently -k -n server,web -c magenta,cyan \"pnpm --filter @ipsengpt/server dev\" \"pnpm --filter @ipsengpt/web dev\"",
-    "dev:mock": "concurrently -k -n mock,server,web -c yellow,magenta,cyan \"pnpm --filter @ipsengpt/server mock:ollama\" \"OLLAMA_URL=http://127.0.0.1:11436 pnpm --filter @ipsengpt/server dev\" \"pnpm --filter @ipsengpt/web dev\"",
+    "dev:mock": "concurrently -k -n mock,server,web -c yellow,magenta,cyan \"pnpm --filter @ipsengpt/server mock:ollama\" \"OLLAMA_URL=http://127.0.0.1:11436 OLLAMA_MODEL=mock pnpm --filter @ipsengpt/server dev\" \"pnpm --filter @ipsengpt/web dev\"",
     "build": "pnpm -r build",
     "start": "pnpm --filter @ipsengpt/server start",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "check": "pnpm typecheck && pnpm test && pnpm build",
-    "test:deploy": "deploy/test/run-all.sh"
+    "test:deploy": "deploy/test/run-all.sh",
+    "smoke:prod": "deploy/test/smoke-prod.py"
   },
   "devDependencies": {
     "concurrently": "^10.0.6"

@@ -33,13 +33,23 @@ export function mockFetch(impl: (url: string, init: RequestInit) => Promise<Resp
 type Handler = (init: RequestInit, url: string) => Response | Promise<Response>;
 
 /**
+ * A live-events stream that sends `chunks` and then stays open (like the real
+ * one) until the app aborts it.
+ */
+export function liveEvents(...chunks: string[]): Handler {
+  return (init) => streamResponse([chunks.join('') || ': connected\n\n', ''], { hold: true, signal: init.signal }).response;
+}
+
+/**
  * Routes fetch calls by "METHOD /path" to handlers, like a tiny fake server.
- * Unrouted calls fail the test loudly.
+ * Unrouted calls fail the test loudly, except the live-events stream, which
+ * by default stays open and quiet.
  */
 export function fakeServer(routes: Record<string, Handler>) {
+  const all: Record<string, Handler> = { 'GET /api/events': liveEvents(), ...routes };
   return mockFetch(async (url, init) => {
     const key = `${init?.method ?? 'GET'} ${url.split('?')[0]}`;
-    const handler = routes[key];
+    const handler = all[key];
     if (!handler) throw new Error(`Unrouted fetch: ${key}`);
     return handler(init ?? {}, url);
   });

@@ -47,7 +47,7 @@ export function refusalSection(gate: Gate): string {
 
 export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps): Router {
   const router = Router();
-  const { sessions, people, limiter, inFlight, gates } = services;
+  const { sessions, people, limiter, inFlight, gates, llm } = services;
   const historyLimit = config.chat.historyTurns * 2;
 
   const Body = z.object({
@@ -61,21 +61,17 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
   router.post('/chat', requireSession(sessions), async (req, res) => {
     const session = sessionOf(res);
 
-    /**
-     * Answers a message sent while a gate is active: the gate's demand when this
-     * message triggered it, else a refusal line, else a refusal the model makes up.
-     */
-    const replyGated = async (gate: Gate, triggered: boolean, userMessage: string) => {
+    /** Answers a message sent while a gate is active: a refusal line, else a refusal the model makes up. */
+    const replyGated = async (gate: Gate, userMessage: string) => {
       inFlight.add(session.id);
       const sse = openSse(res, config.sseHeartbeatMs);
       sse.send('gate', gateView(gate));
       try {
         const n = gates.refused(gate.id);
         let reply: string;
-        if (triggered) reply = gate.guestPrompt;
-        else if (gate.refusalLines.length > 0) reply = gate.refusalLines[n % gate.refusalLines.length]!;
+        if (gate.refusalLines.length > 0) reply = gate.refusalLines[n % gate.refusalLines.length]!;
         else reply = await generateRefusal(gate, sse, n, userMessage);
-        if (triggered || gate.refusalLines.length > 0) sse.send('token', { text: reply });
+        if (gate.refusalLines.length > 0) sse.send('token', { text: reply });
         sessions.addExchange(session.id, userMessage, reply);
         sse.send('done', {});
       } finally {
@@ -128,6 +124,11 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' });
       return;
     }
+    const status = llm.status();
+    if (!status.open) {
+      res.status(503).json({ error: status.message, code: 'chat_closed', status });
+      return;
+    }
     if (inFlight.has(session.id)) {
       res.status(429).json({ error: BUSY_MESSAGE });
       return;
@@ -137,12 +138,9 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
 
     const userMessage = parsed.data.message;
     // Gates are decided here, in code. The model is never asked whether to unlock.
-    const { gate, triggered } = gates.beforeChat(
-      { id: session.id, personSlug: session.state === 'claimed' ? session.personSlug : null },
-      sessions.userMessageCount(session.id),
-    );
+    const gate = gates.current(session.id);
     if (gate) {
-      await replyGated(gate, triggered, userMessage);
+      await replyGated(gate, userMessage);
       return;
     }
 
@@ -178,6 +176,12 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
         sse.send('token', { text: delta });
       }
       sessions.addExchange(session.id, userMessage, reply);
+      // A gate reached with this message shows up now, before the guest types again.
+      const next = gates.afterReply(
+        { id: session.id, personSlug: session.state === 'claimed' ? session.personSlug : null },
+        sessions.userMessageCount(session.id),
+      );
+      if (next) sse.send('gate', gateView(next));
       sse.send('done', {});
     } catch (err) {
       if (err instanceof OllamaError && err.kind === 'aborted') {

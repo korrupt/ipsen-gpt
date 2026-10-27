@@ -28,6 +28,7 @@ cp .env.example .env
 | `pnpm check` | Gate: typecheck + all tests + production build |
 | `pnpm build && pnpm start` | Production mode: server serves the built frontend on `PORT` |
 | `pnpm test:deploy` | Deployment tests in Docker: shellcheck, Nginx, SSH tunnel, backups, compose, deploy.sh (~2 min) |
+| `pnpm smoke:prod` | Smoke test of the live site from outside, as a guest (see "Verify on the real droplet") |
 
 Test on a phone on the same network: `pnpm --filter @ipsengpt/web dev --host` and open the printed LAN URL.
 
@@ -73,7 +74,7 @@ every use, so edits apply without a restart; mistakes show up in Admin → Gates
 | `trigger.type` | When |
 | --- | --- |
 | `session_start` | Before a new guest can chat. In a person's file: when their claim is approved. |
-| `after_messages` | Once the guest has sent `count` messages. |
+| `after_messages` | Right after the reply to the guest's `count`th message, so it shows up before they type again. |
 | `timed_global` | At `at` (ISO time **with timezone**, e.g. `2026-10-31T22:30:00+01:00`), for every guest, until `deadline_minutes` later. Then it expires; whoever didn't make it misses the points. |
 | `admin_forced` | Only when you force it in admin. |
 | `curse_break`, `secret_level` | Reserved for curses (Phase 5) and the secrets game (Phase 6). |
@@ -81,6 +82,9 @@ every use, so edits apply without a restart; mistakes show up in Admin → Gates
 - `target` goes into the verification prompt: describe what the camera should see.
 - `refusal_lines` are used in turn. Leave it empty to let the model make up refusals.
 - Each triggered gate fires once per guest. You can force any gate again.
+- Gates reach guests the moment they start (forced, timed or triggered) over the live event stream
+  (`/api/events`), so nobody's message is spent on discovering a gate. Anything typed while a gate is
+  active gets a refusal.
 
 **Admin → Gates:** force a gate (or a custom one you type in) on one guest or everyone, with an
 optional deadline; cancel active gates (for example if the PC is down and nobody can pass).
@@ -92,8 +96,8 @@ for verification. After the verdict it uploads the original (up to 20 MB) in the
 The server checks file types by their bytes, turns photos upright, and strips EXIF (GPS, device).
 HEIC files the server can't decode are kept as uploaded and flagged in admin.
 
-**Verification** uses the primary (PC) model only, at temperature 0, with a JSON schema. If the PC is
-down or the fallback is forced, photos are "unverified" and the guest can retry. Rate limit: one photo
+**Verification** uses the PC's model at temperature 0, with a JSON schema. If the PC is
+unreachable, photos are "unverified" and the guest can retry. Photos are still verified while chat is paused. Rate limit: one photo
 per guest per 15 s (`RATE_PHOTO_SESSION`).
 
 With `pnpm dev:mock`, the mock model fails every other photo (`MOCK_OLLAMA_VERDICT=cycle`; also
@@ -109,19 +113,22 @@ Every color, font, bubble style, background image and the portrait is a CSS cust
 
 ```
 guest phone ──HTTPS──▶ Cloudflare ──HTTPS──▶ droplet: Nginx ──▶ app 127.0.0.1:3000 (Docker, host network)
-                                                                  ├─ primary  127.0.0.1:11435 ─ssh tunnel─▶ PC Ollama
-                                                                  └─ fallback 127.0.0.1:11434 ─ ollama container
+                                                                  └─ 127.0.0.1:11435 ─ssh tunnel─▶ PC Ollama
 ```
 
-The app uses the PC's model and falls back to the droplet's small model when the PC can't answer:
-- **PC unreachable** (tunnel down, Ollama stopped): fallback immediately.
+There is one model, on the PC. **While it can't be reached, chat is closed**: guests see a banner
+("IpsenGPT has lost contact with the spirit world…") and can't send, and it reopens by itself when the
+PC is back. Guests get these changes live over `/api/events`.
+- **Checked every `OLLAMA_CHECK_INTERVAL_MS`** (5 s): the PC must answer and have `OLLAMA_MODEL` pulled.
+- **PC unreachable** (tunnel down, Ollama stopped) during a reply: that reply fails and chat closes at once.
 - **PC dead but tunnel still up** (asleep or hung): a health check sent with each request gets no
-  answer, so the app falls back after `OLLAMA_CONNECT_TIMEOUT_MS` (3 s).
-- **PC alive but busy** (queued guests): the app keeps waiting for up to `OLLAMA_FIRST_TOKEN_TIMEOUT_MS`
-  (15 s), then falls back.
+  answer within `OLLAMA_CONNECT_TIMEOUT_MS` (3 s); chat closes.
+- **PC alive but busy** (queued guests): the app waits up to `OLLAMA_FIRST_TOKEN_TIMEOUT_MS` (45 s)
+  for the reply to start. If it doesn't, that reply fails, but chat stays open.
 
-After any failure it skips the PC for `OLLAMA_PRIMARY_RETRY_MS` (30 s) before trying it again.
-Admin → System shows both models, lets you force the fallback, and lists recent errors.
+**Admin → System** shows whether the PC is connected, what guests see, how many pages are open, and
+recent errors. **Pause chat** closes it for everyone with a reason you type (e.g. during speeches);
+guests see your text in the banner until you resume. It survives restarts.
 
 | File | Runs on | Purpose |
 | --- | --- | --- |
@@ -130,7 +137,7 @@ Admin → System shows both models, lets you force the fallback, and lists recen
 | [deploy/pc/setup-ollama.sh](deploy/pc/setup-ollama.sh) | PC | Ollama service with `OLLAMA_KEEP_ALIVE=-1`, pull + warm model |
 | [deploy/pc/tunnel.sh](deploy/pc/tunnel.sh) | PC | Reverse tunnel with reconnect loop |
 | [deploy/droplet/setup.sh](deploy/droplet/setup.sh) | droplet | Swap, users, sshd, ufw, Docker, Nginx, certbot, backup cron |
-| [deploy/docker-compose.yml](deploy/docker-compose.yml) | droplet | App + fallback Ollama |
+| [deploy/docker-compose.yml](deploy/docker-compose.yml) | droplet | The app |
 | [deploy/env.production.example](deploy/env.production.example) | droplet | Template for `/srv/ipsengpt/app/.env` |
 
 ### 0. Cloudflare
@@ -174,8 +181,12 @@ entirely on the GPU at 53.6 tokens/s. With 12 GB of VRAM or more, the 8b is an o
 scp -r deploy/droplet root@<droplet-ip>:/root/ipsengpt-setup
 ```
 ```bash
-ssh root@<droplet-ip> /root/ipsengpt-setup/setup.sh --admin-user <you> --email <you@example.com> --tunnel-key "$(cat ~/.ssh/ipsengpt_tunnel.pub)"
+ssh -t root@<droplet-ip> "/root/ipsengpt-setup/setup.sh --admin-user <you> --email <you@example.com> --tunnel-key '$(cat ~/.ssh/ipsengpt_tunnel.pub)'"
 ```
+Mind the quotes: ssh joins its arguments and the droplet's shell splits them again, so the key needs its
+own (single) quotes inside the remote command, or its parts arrive as separate options. If the key is on
+another machine, paste the `.pub` line between the single quotes instead of `$(cat ...)`. `-t` keeps the
+Cloudflare token prompt hidden.
 This creates a 2 GB swap file and an admin user `<you>` with root's SSH keys and sudo. It adds the
 `tunnel` user (no shell; the key can only listen on `127.0.0.1:11435`) and turns off SSH passwords
 and `GatewayPorts`. It enables ufw with only 22/80/443 open, installs Docker, Nginx and certbot,
@@ -200,7 +211,7 @@ deploy/deploy.sh <you>@<droplet-ip>
 ```
 This runs `pnpm check`, builds `ipsengpt:<git-sha>`, streams it to the droplet with
 `docker save | ssh docker load`, syncs the compose file, persona and gates, and runs `docker compose up -d`.
-The first deploy also pulls the fallback model. It then waits for `/api/health`.
+It then waits for `/api/health`.
 **Rollback:** set `IPSENGPT_TAG=<previous>` (printed by deploy.sh) in `/srv/ipsengpt/app/.env`, then
 `docker compose up -d`.
 
@@ -216,13 +227,22 @@ curl -s https://chat.ipsen.no/api/health
 ```bash
 ssh <you>@<droplet-ip> 'sudo ss -ltnp | grep -v 127.0.0. ; sudo ufw status'
 ```
-1. The health check returns `{"ok":true}`. The only public listeners are sshd (22) and Nginx (80/443). Ports 3000, 11434 and 11435 appear only on 127.0.0.1.
-2. Start `deploy/pc/tunnel.sh`, open the site, and chat. Admin → System shows **Primary: Ready**.
+1. The health check returns `{"ok":true}`. The only public listeners are sshd (22) and Nginx (80/443). Ports 3000 and 11435 appear only on 127.0.0.1.
+2. Start `deploy/pc/tunnel.sh`, open the site, and chat. Admin → System shows the model **Connected**.
 3. A reply streams word by word through Cloudflare. If it arrives all at once, something buffers SSE.
-4. Stop the tunnel (Ctrl-C) and chat again: you get a reply from the fallback (small model) right away,
-   and System shows it answering. Restart the tunnel; within 30 s the primary is used again.
+4. Stop the tunnel (Ctrl-C). Within about 5 s the phone shows the "lost contact" banner and can't send.
+   Restart the tunnel; within about 5 s the banner goes away by itself.
 5. In Admin → Sessions, a guest's last-seen is correct and rate limits are per guest: each phone has its
    own IP in the app, not Cloudflare's.
+
+Then the smoke test, from any machine (Python 3, standard library only):
+```bash
+pnpm smoke:prod --origin <droplet-ip>
+```
+It checks Cloudflare and TLS, the origin certificate and closed ports, the guest flow, the live event
+stream, streaming replies, one-reply-at-a-time, the rate limit and the size limit. It creates guests
+named "Smoke Test <n>" and sends about ten short chats; end them in Admin → Sessions afterwards.
+`--no-chat` leaves the model alone.
 
 ### Backups and restore
 
@@ -255,4 +275,4 @@ docker compose start app
 - Linux laptop: plug it in and disable suspend (Settings → Power, or `systemctl mask sleep.target suspend.target`).
 - Close games, Steam and other GPU-heavy apps. Check `ollama ps`: the model shows as loaded `Forever`.
 - Run `deploy/pc/tunnel.sh` in a terminal that stays open all night (on Windows this also keeps WSL alive).
-- Admin → System: Primary **Ready**.
+- Admin → System: model **Connected**, and chat not paused.

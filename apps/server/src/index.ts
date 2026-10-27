@@ -33,8 +33,14 @@ const ticker = setInterval(() => {
   }
 }, 5000);
 
+// Is the PC reachable? Guests see the answer live, and chat closes while it isn't.
+const checkModel = () => void services.llm.check();
+checkModel();
+const modelChecker = setInterval(checkModel, config.ollama.checkIntervalMs);
+
 const shutdown = () => {
   clearInterval(ticker);
+  clearInterval(modelChecker);
   server.close(() => {
     services.db.close();
     process.exit(0);

@@ -7,7 +7,7 @@ describe('parseConfig', () => {
     const c = parseConfig({}, '/base');
     expect(c.ollama.numCtx).toBe(4096);
     expect(c.ollama.connectTimeoutMs).toBe(3000);
-    expect(c.ollama.firstTokenTimeoutMs).toBe(15000);
+    expect(c.ollama.firstTokenTimeoutMs).toBe(45000);
     expect(c.chat.maxInputChars).toBe(500);
     expect(c.chat.historyTurns).toBe(8);
     expect(c.sseHeartbeatMs).toBe(20000);
@@ -38,12 +38,10 @@ describe('parseConfig', () => {
     expect(parseConfig({ ADMIN_PASSWORD: '' }, '/base').admin.password).toBeNull();
   });
 
-  it('parses the fallback model; empty URL means no fallback', () => {
-    expect(parseConfig({}, '/').ollama.fallback).toBeNull();
-    const c = parseConfig({ OLLAMA_FALLBACK_URL: 'http://127.0.0.1:11434/', OLLAMA_PRIMARY_RETRY_MS: '0' }, '/');
-    expect(c.ollama.fallback).toEqual({ url: 'http://127.0.0.1:11434', model: 'llama3.2:1b' });
-    expect(c.ollama.primaryRetryMs).toBe(0);
-    expect(() => parseConfig({ OLLAMA_FALLBACK_URL: 'nope' }, '/')).toThrow(/OLLAMA_FALLBACK_URL/);
+  it('has model timeouts suited to a single model with no fallback', () => {
+    expect(parseConfig({}, '/').ollama).toMatchObject({ connectTimeoutMs: 3000, firstTokenTimeoutMs: 45000, checkIntervalMs: 5000 });
+    // Old .env files may still have the fallback settings; they are ignored.
+    expect(() => parseConfig({ OLLAMA_FALLBACK_URL: 'http://127.0.0.1:11434', OLLAMA_PRIMARY_RETRY_MS: '0' }, '/')).not.toThrow();
   });
 
   it('rejects invalid values with a readable error', () => {

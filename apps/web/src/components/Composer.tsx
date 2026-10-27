@@ -3,6 +3,8 @@ import { MAX_INPUT_CHARS } from '../lib/chatApi';
 
 interface Props {
   streaming: boolean;
+  /** Chat is closed (PC unreachable or paused): nothing can be sent, but typed text is kept. */
+  disabled?: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
 }
@@ -12,10 +14,10 @@ const COUNTER_FROM = MAX_INPUT_CHARS - 100;
 /** Touch devices: Enter inserts a newline, like the ChatGPT app. */
 const isCoarsePointer = () => typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 
-export function Composer({ streaming, onSend, onStop }: Props) {
+export function Composer({ streaming, disabled = false, onSend, onStop }: Props) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
-  const canSend = !streaming && text.trim().length > 0 && text.length <= MAX_INPUT_CHARS;
+  const canSend = !streaming && !disabled && text.trim().length > 0 && text.length <= MAX_INPUT_CHARS;
 
   // Grow with content up to the CSS max-height.
   useLayoutEffect(() => {
@@ -52,8 +54,9 @@ export function Composer({ streaming, onSend, onStop }: Props) {
           rows={1}
           value={text}
           maxLength={MAX_INPUT_CHARS}
-          placeholder="Ask IpsenGPT anything"
+          placeholder={disabled ? 'Chat is closed right now' : 'Ask IpsenGPT anything'}
           aria-label="Message IpsenGPT"
+          disabled={disabled && !streaming}
           enterKeyHint="send"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}

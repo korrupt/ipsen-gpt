@@ -36,7 +36,7 @@ trap 'log "stopped"; exit 0' INT TERM
 if curl -sf --max-time 3 "http://$LOCAL_OLLAMA/api/version" >/dev/null; then
   log "local Ollama is up at $LOCAL_OLLAMA"
 else
-  log "WARNING: no Ollama at $LOCAL_OLLAMA yet (guests get the fallback model until it's up)"
+  log "WARNING: no Ollama at $LOCAL_OLLAMA yet (guests see that chat is closed until it's up)"
 fi
 
 while true; do

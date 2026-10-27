@@ -2,9 +2,10 @@
 # One-time (re-runnable) droplet setup. Run as root on a fresh Ubuntu droplet:
 #
 #   scp -r deploy/droplet root@<droplet-ip>:/root/ipsengpt-setup
-#   ssh root@<droplet-ip> /root/ipsengpt-setup/setup.sh \
-#       --admin-user <name> --tunnel-key "<contents of ~/.ssh/ipsengpt_tunnel.pub>" \
-#       --email <you@example.com>
+#   ssh -t root@<droplet-ip> "/root/ipsengpt-setup/setup.sh \
+#       --admin-user <name> --tunnel-key '<contents of ~/.ssh/ipsengpt_tunnel.pub>' \
+#       --email <you@example.com>"
+#   (The key needs its own quotes inside the remote command: ssh re-splits it.)
 #
 # --domain <name> serves another hostname (default chat.ipsen.no).
 # Steps can be skipped with --skip <step> (repeatable):
@@ -18,7 +19,7 @@ TUNNEL_KEY=''
 EMAIL=''
 SKIP=()
 
-usage() { sed -n '2,11p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,12p' "$0"; exit "${1:-0}"; }
 while [[ $# -gt 0 ]]; do
   case $1 in
     --admin-user) ADMIN_USER=$2; shift 2 ;;

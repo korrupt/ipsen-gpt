@@ -1,41 +1,37 @@
-import { useState } from 'react';
-import { adminApi, ago, type ProbeResult } from './api';
+import { useState, type FormEvent } from 'react';
+import { adminApi, ago, type SystemStatus } from './api';
 import { usePoll } from './usePoll';
 
-function ModelCard({ title, probe, active }: { title: string; probe: ProbeResult; active: boolean }) {
-  const ok = probe.reachable && probe.hasModel;
-  const state = !probe.reachable ? 'Unreachable' : probe.hasModel ? 'Ready' : 'Model not pulled';
+function ModelCard({ model }: { model: SystemStatus['model'] }) {
+  const ok = model.reachable && model.hasModel;
+  const state = !model.reachable ? 'Disconnected' : model.hasModel ? 'Connected' : 'Model not pulled';
   return (
-    <div className="card" data-testid={`model-${title.toLowerCase()}`}>
+    <div className="card" data-testid="model">
       <div className="card__row">
-        <strong>{title}</strong>
+        <strong>Model (the PC)</strong>
         <span className={`badge ${ok ? 'badge--claimed' : 'badge--pending_claim'}`}>{state}</span>
       </div>
-      <div>
-        {probe.model}
-        {active && <span className="admin-muted"> · answering now</span>}
+      <div>{model.model}</div>
+      <div className="admin-muted">
+        {model.url}
+        {model.checkedAt !== null && ` · checked ${ago(model.checkedAt)}`}
       </div>
-      <div className="admin-muted">{probe.url}</div>
-      {probe.error && <div className="admin-error">{probe.error}</div>}
+      {model.error && <div className="admin-error">{model.error}</div>}
     </div>
   );
 }
 
-export function SystemTab({ toast }: { toast: (msg: string) => void }) {
-  const { data, reload, error } = usePoll(adminApi.system, 10000);
+/** Pause chat for everyone with a reason guests see, or resume it. */
+function PauseCard({ pauseReason, onChange, toast }: { pauseReason: string | null; onChange: () => Promise<void>; toast: (msg: string) => void }) {
+  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
 
-  if (!data) return <p className="admin-muted admin-tab">{error ?? 'Loading…'}</p>;
-  const { llm, errors } = data;
-  // What the next guest message will use.
-  const next = llm.forceFallback || llm.primarySkippedUntil ? 'fallback' : 'primary';
-
-  const toggle = async () => {
+  const run = async (action: () => Promise<unknown>, done: string) => {
     setBusy(true);
     try {
-      const r = await adminApi.setForceFallback(!llm.forceFallback);
-      toast(r.forceFallback ? 'Forced fallback model' : 'Back to automatic');
-      await reload();
+      await action();
+      toast(done);
+      await onChange();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed');
     } finally {
@@ -43,20 +39,63 @@ export function SystemTab({ toast }: { toast: (msg: string) => void }) {
     }
   };
 
+  const pause = (e: FormEvent) => {
+    e.preventDefault();
+    if (reason.trim()) void run(() => adminApi.pause(reason.trim()), 'Chat paused');
+  };
+
+  if (pauseReason) {
+    return (
+      <div className="card" data-testid="pause">
+        <div className="card__row">
+          <strong>Chat is paused</strong>
+          <span className="badge badge--pending_claim">Paused</span>
+        </div>
+        <div>Guests see: “{pauseReason}”</div>
+        <div className="card__actions">
+          <button className="btn" disabled={busy} onClick={() => void run(adminApi.resume, 'Chat resumed')}>
+            Resume chat
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <form className="card" data-testid="pause" onSubmit={pause}>
+      <label className="admin-label" htmlFor="pause-reason">
+        Pause chat for everyone
+      </label>
+      <input
+        id="pause-reason"
+        className="admin-input"
+        placeholder="What guests see, e.g. Speeches! IpsenGPT is back in 10 minutes."
+        maxLength={300}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <div className="card__actions">
+        <button className="btn btn--danger" type="submit" disabled={busy || !reason.trim()}>
+          Pause chat
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function SystemTab({ toast }: { toast: (msg: string) => void }) {
+  const { data, reload, error } = usePoll(adminApi.system, 10000);
+
+  if (!data) return <p className="admin-muted admin-tab">{error ?? 'Loading…'}</p>;
+  const { model, status, pauseReason, listeners, errors } = data;
+
   return (
     <section className="admin-tab">
-      <ModelCard title="Primary" probe={llm.primary} active={next === 'primary'} />
-      {llm.fallback && <ModelCard title="Fallback" probe={llm.fallback} active={next === 'fallback'} />}
-      {llm.primarySkippedUntil && !llm.forceFallback && (
-        <p className="admin-muted">
-          Primary failed recently; trying it again in {Math.max(0, Math.ceil((llm.primarySkippedUntil - Date.now()) / 1000))} s.
-        </p>
-      )}
-      {llm.fallback && (
-        <button className={`btn ${llm.forceFallback ? 'btn--danger' : ''}`} disabled={busy} onClick={() => void toggle()}>
-          {llm.forceFallback ? 'Stop forcing fallback' : 'Force fallback model'}
-        </button>
-      )}
+      <p className="admin-muted" data-testid="guest-view">
+        {status.open ? 'Guests can chat.' : `Chat is closed. Guests see: “${status.message}”`} {listeners} page
+        {listeners === 1 ? '' : 's'} open.
+      </p>
+      <ModelCard model={model} />
+      <PauseCard pauseReason={pauseReason} onChange={reload} toast={toast} />
       <h3 className="admin-h3">Recent errors</h3>
       {errors.length === 0 && <p className="admin-muted">None.</p>}
       <ul className="admin-list">

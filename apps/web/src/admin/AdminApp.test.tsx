@@ -159,47 +159,69 @@ describe('ago', () => {
 });
 
 describe('system', () => {
-  const probe = (over: Record<string, unknown> = {}) => ({
+  const model = (over: Record<string, unknown> = {}) => ({
     url: 'http://127.0.0.1:11435',
-    model: 'qwen3-vl:8b',
+    model: 'qwen3-vl:8b-instruct',
     reachable: true,
     hasModel: true,
     error: null,
+    checkedAt: Date.now(),
     ...over,
   });
 
-  it('shows both models, recent errors, and toggles force fallback', async () => {
-    let forced = false;
-    const status = () => ({
-      llm: {
-        forceFallback: forced,
-        lastUsed: 'fallback',
-        primarySkippedUntil: Date.now() + 20_000,
-        primary: probe({ reachable: false, hasModel: false, error: 'fetch failed' }),
-        fallback: probe({ url: 'http://127.0.0.1:11434', model: 'llama3.2:1b' }),
-      },
-      errors: [{ at: Date.now(), message: 'Primary model failed, using fallback', detail: 'Ollama unreachable' }],
+  it('shows whether the PC is connected, what guests see, and recent errors', async () => {
+    loggedIn({
+      'GET /api/admin/system': () =>
+        json({
+          model: model({ reachable: false, hasModel: false, error: 'fetch failed' }),
+          status: { open: false, reason: 'disconnected', message: 'IpsenGPT has lost contact.' },
+          pauseReason: null,
+          listeners: 3,
+          errors: [{ at: Date.now(), message: 'Model check failed, chat closed: fetch failed', detail: '' }],
+        }),
     });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^system$/i }));
+    const card = await screen.findByTestId('model');
+    expect(card.textContent).toContain('Disconnected');
+    expect(card.textContent).toContain('fetch failed');
+    expect(screen.getByTestId('guest-view').textContent).toMatch(/Chat is closed\. Guests see: “IpsenGPT has lost contact\.” 3 pages open/);
+    expect(screen.getByText('Model check failed, chat closed: fetch failed')).toBeTruthy();
+  });
+
+  it('pauses chat with a reason and resumes it', async () => {
+    let pauseReason: string | null = null;
     const fetch = loggedIn({
-      'GET /api/admin/system': () => json(status()),
-      'POST /api/admin/system/force-fallback': (init) => {
-        forced = JSON.parse(init.body as string).enabled;
-        return json({ forceFallback: forced });
+      'GET /api/admin/system': () =>
+        json({
+          model: model(),
+          status: pauseReason ? { open: false, reason: 'paused', message: pauseReason } : { open: true, reason: null, message: null },
+          pauseReason,
+          listeners: 1,
+          errors: [],
+        }),
+      'PUT /api/admin/system/pause': (init) => {
+        pauseReason = JSON.parse(init.body as string).reason;
+        return json({ pauseReason });
+      },
+      'DELETE /api/admin/system/pause': () => {
+        pauseReason = null;
+        return json({ pauseReason });
       },
     });
     render(<AdminApp />);
     await userEvent.click(await screen.findByRole('button', { name: /^system$/i }));
+    expect((await screen.findByTestId('model')).textContent).toContain('Connected');
+    expect(screen.getByRole('button', { name: 'Pause chat' })).toHaveProperty('disabled', true);
 
-    const primary = await screen.findByTestId('model-primary');
-    expect(primary.textContent).toContain('Unreachable');
-    expect(primary.textContent).toContain('fetch failed');
-    expect(screen.getByTestId('model-fallback').textContent).toMatch(/Ready.*llama3\.2:1b.*answering now/);
-    expect(screen.getByText(/trying it again in 2\d s/)).toBeTruthy();
-    expect(screen.getByText('Primary model failed, using fallback')).toBeTruthy();
+    await userEvent.type(screen.getByLabelText('Pause chat for everyone'), '  Speeches!  ');
+    await userEvent.click(screen.getByRole('button', { name: 'Pause chat' }));
+    expect(await screen.findByText('Guests see: “Speeches!”')).toBeTruthy();
+    const put = fetch.mock.calls.find(([url, init]) => url === '/api/admin/system/pause' && init.method === 'PUT')!;
+    expect(JSON.parse(put[1].body as string)).toEqual({ reason: 'Speeches!' });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Force fallback model' }));
-    expect(await screen.findByRole('button', { name: 'Stop forcing fallback' })).toBeTruthy();
-    const posts = fetch.mock.calls.filter(([url]) => url === '/api/admin/system/force-fallback');
-    expect(JSON.parse(posts[0]![1].body as string)).toEqual({ enabled: true });
+    await userEvent.click(screen.getByRole('button', { name: 'Resume chat' }));
+    expect(await screen.findByLabelText('Pause chat for everyone')).toBeTruthy();
+    expect(screen.getByTestId('guest-view').textContent).toMatch(/^Guests can chat\./);
   });
 });

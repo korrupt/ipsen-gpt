@@ -307,6 +307,25 @@ button {
   color: var(--color-error);
 }
 
+/* Chat closed (PC unreachable or paused by the host) */
+.chat-closed {
+  flex: none;
+  max-width: var(--content-max-width);
+  width: calc(100% - 24px);
+  margin: 0 auto 4px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--color-claim-bg);
+  color: var(--color-claim-text);
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.composer__input:disabled {
+  cursor: not-allowed;
+}
+
 /* Pending claim */
 .claim-banner {
   flex: none;

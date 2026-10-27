@@ -25,23 +25,3 @@ services:
     logging:
       driver: json-file
       options: { max-size: 10m, max-file: "3" }
-
-  # Fallback model for when the PC is unreachable. Text only (no vision).
-  ollama:
-    image: ollama/ollama:0.40.11
-    ports:
-      - "127.0.0.1:11434:11434"
-    environment:
-      OLLAMA_KEEP_ALIVE: "-1"
-      OLLAMA_NUM_PARALLEL: "1"
-      OLLAMA_MAX_LOADED_MODELS: "1"
-    volumes:
-      - ollama:/root/.ollama
-    mem_limit: 2g
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options: { max-size: 10m, max-file: "3" }
-
-volumes:
-  ollama:

@@ -97,6 +97,11 @@ export interface GateSubject {
  * the photo route asks it to after a verified photo. Nothing said in chat can.
  */
 export class GateStore {
+  /** Sessions whose current gate may have changed, reported together on the next microtask. */
+  private changed = new Set<string>();
+  /** Hears which sessions' current gate may have changed (after the change is committed). */
+  onChange: (sessionIds: string[]) => void = () => {};
+
   constructor(
     private readonly db: Db,
     /** Current definitions (re-read from disk by the caller as it likes). */
@@ -160,21 +165,19 @@ export class GateStore {
   }
 
   /**
-   * Called before a chat message is answered. Fires after_messages gates the
-   * guest has reached; returns the gate that blocks this message, if any, and
-   * whether it was triggered by this very message.
+   * Called right after a reply is stored. Fires the after_messages gates the
+   * guest has now reached, so the gate shows up before they type again and no
+   * message of theirs is spent on it. Returns the gate that now blocks chat, if
+   * this call created it.
    */
-  beforeChat(subject: GateSubject, userMessagesSoFar: number): { gate: Gate | undefined; triggered: boolean } {
-    const before = this.current(subject.id);
-    if (!before) {
-      for (const def of this.defs().defs) {
-        if (def.trigger.type !== 'after_messages' || userMessagesSoFar < def.trigger.count) continue;
-        if (def.personSlug !== null && def.personSlug !== subject.personSlug) continue;
-        this.give(subject.id, { def }, 'after_messages');
-      }
+  afterReply(subject: GateSubject, userMessagesSoFar: number): Gate | undefined {
+    if (this.current(subject.id)) return undefined;
+    for (const def of this.defs().defs) {
+      if (def.trigger.type !== 'after_messages' || userMessagesSoFar < def.trigger.count) continue;
+      if (def.personSlug !== null && def.personSlug !== subject.personSlug) continue;
+      this.give(subject.id, { def }, 'after_messages');
     }
-    const gate = this.current(subject.id);
-    return { gate, triggered: !before && gate !== undefined };
+    return this.current(subject.id);
   }
 
   /**
@@ -239,16 +242,31 @@ export class GateStore {
     if (!gate) throw new GateError('No such gate.', 404);
     if (gate.status !== 'active') throw new GateError(`That gate is already ${gate.status}.`);
     this.db.prepare('UPDATE gates SET status = ?, resolved_at = ? WHERE id = ?').run(status, this.now(), id);
+    this.touched(gate.sessionId);
     return this.get(id)!;
   }
 
   private expire(): void {
-    this.db
+    const rows = this.db
       .prepare(
         `UPDATE gates SET status = 'expired', resolved_at = deadline_at
-         WHERE status = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ?`,
+         WHERE status = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ?
+         RETURNING session_id`,
       )
-      .run(this.now());
+      .all(this.now()) as { session_id: string }[];
+    for (const r of rows) this.touched(r.session_id);
+  }
+
+  /** Batches change reports, so a transaction that gates everyone reports once, after it commits. */
+  private touched(sessionId: string): void {
+    if (this.changed.size === 0) {
+      queueMicrotask(() => {
+        const ids = [...this.changed];
+        this.changed.clear();
+        this.onChange(ids);
+      });
+    }
+    this.changed.add(sessionId);
   }
 
   /** Inserts a gate; triggered gates are skipped if the session already had them. */
@@ -265,6 +283,8 @@ export class GateStore {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
       )
       .run(id, sessionId, g.key, source, g.target, g.guestPrompt, JSON.stringify(g.refusalLines), g.points, this.now(), deadlineAt);
-    return r.changes ? this.get(id) : undefined;
+    if (!r.changes) return undefined;
+    this.touched(sessionId);
+    return this.get(id);
   }
 }

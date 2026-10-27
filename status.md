@@ -37,6 +37,8 @@ Gates at last run (2026-10-26, native Linux, after the switch to `chat.ipsen.no`
 - **Reserved names:** several guests may claim the same person in parallel. Approving one
   renames that session to the person's display name; the other claimants get a notice and must
   pick a new name.
+- **Hourly backups are off on the droplet** (the user removed `/etc/cron.d/ipsengpt-backup` on 2026-10-27).
+  `sudo ipsengpt-backup` still works by hand. Re-running `setup.sh` re-adds the cron job unless it gets `--skip backup`.
 - **Domain: `chat.ipsen.no`** (was `artifical.ipsen.no`; switched before the first real deploy). It must
   stay one level below `ipsen.no`, since Cloudflare's free edge certificate only covers `*.ipsen.no`. The
   Nginx site is a template (`__DOMAIN__`) filled in by `setup.sh --domain`.
@@ -45,16 +47,24 @@ Gates at last run (2026-10-26, native Linux, after the switch to `chat.ipsen.no`
   ranges only). SSH and the tunnel must use the droplet IP or a DNS-only name, never `chat.ipsen.no`.
 - **Droplet:** the `ipsen.no` host in the user's SSH config, fresh Ubuntu 24.04.
 - **Images:** built on the PC and shipped with `docker save | ssh docker load` (no registry).
-- **Fallback timeouts** (see `apps/server/src/ollama.ts`): connection refused → fall back at once;
-  health check (`/api/version`) silent for 3 s → PC is dead, fall back; PC alive but no first
-  token within 15 s → fall back. A failed primary is skipped for 30 s.
+- **No fallback model** (removed 2026-10-27, the user found the 1b far too slow). One model, on the PC.
+  `llm.ts` checks it every 5 s (`OLLAMA_CHECK_INTERVAL_MS`); while it's unreachable or the model isn't
+  pulled, **chat is closed** (503 `chat_closed`) and guests see a banner. A refused connection or a
+  silent health check (3 s) during a request closes chat at once. A busy PC (no first token within
+  45 s) only fails that reply. Photos are still verified while paused.
+- **Pause chat:** admin → System, with a custom reason guests see (`settings.pauseReason`, survives restarts).
+- **Live events built early** (Phase 5's stream): `GET /api/events` sends `status` and `gate` snapshots
+  on connect and on every change (`events.ts` EventHub; `GateStore.onChange`, `Llm.onStatusChange`).
+  The client uses fetch (token in a header, not the URL) and reconnects with backoff.
+- **Gates show up immediately:** forced/timed/expired gates are pushed live; `after_messages` gates fire
+  right after the reply to the Nth message (sent in that chat stream too), not on message N+1. The user
+  chose to keep typing + refusals while a gate is active.
 - **Models** (benchmarked by the user):
 
   | Machine | Model | Notes |
   | --- | --- | --- |
   | Gaming PC (party primary) | `qwen3-vl:8b-instruct` | 100% GPU, 5.8 GB, prompt 435 tok/s, generation 70 tok/s |
   | Native Linux laptop (testing) | `qwen3-vl:4b-instruct` | 8 GB RTX 2000 Ada: 8b only 86% on GPU (21.7 tok/s); 4b is 53.6 tok/s |
-  | Droplet fallback | `llama3.2:1b` | CPU only, text only (photo gates must report "unverified") |
 
   The model **name** is set in the droplet's `.env` (`OLLAMA_MODEL`); the PC only needs it pulled.
   It's `qwen3-vl` with a lowercase L: the user once typed `qwen3-v1` and got "file does not exist".
@@ -114,10 +124,9 @@ The repo was developed on **native Ubuntu**. Things to check after cloning into 
 | `pnpm dev` | Same, against `OLLAMA_URL` in `.env` (real Ollama on :11434) |
 | `pnpm check` | Gate: typecheck + all unit/integration tests + build |
 | `pnpm test:deploy [suite...]` | Docker-based deploy tests: shellcheck nginx setup tunnel backup compose deploy |
+| `pnpm smoke:prod [--origin <ip>] [--no-chat]` | Smoke test of the live site as a guest (creates "Smoke Test <n>" guests) |
 
-To test fallback locally against the real model: `OLLAMA_URL=http://127.0.0.1:11434`,
-`OLLAMA_FALLBACK_URL=http://127.0.0.1:11436`, run `pnpm --filter @ipsengpt/server mock:ollama` plus
-`pnpm dev`, then `sudo systemctl stop ollama`.
+To see chat close and reopen locally: `pnpm dev:mock`, then stop and restart the mock process.
 
 ## Code map
 
@@ -126,7 +135,8 @@ apps/server/src/
   index.ts, app.ts, services.ts   entry, Express wiring, service container (createServices)
   config.ts                       all .env parsing (zod); relative paths resolve against the .env dir
   ollama.ts                       streamChat: NDJSON streaming, health check + timeouts
-  llm.ts                          primary/fallback routing, probe(), status for admin
+  llm.ts                          the one model: chat/vision, 5 s checks, open/closed status, pause, probe()
+  events.ts                       EventHub: live events to guests' /api/events streams
   prompt.ts                       persona + extra system sections + trimmed history
   gateDefs.ts                     gates.json parsing (global + per person), re-read on every use
   gates.ts                        GateStore: triggers, force/cancel, expiry, timed gates; only it sets passed
@@ -137,10 +147,10 @@ apps/server/src/
   people.ts                       person folders on disk (person.md + gates.json), .trash on delete
   names.ts, claimCodes.ts         name validation/keys; BAT-427 codes (no O/I/L/0/1)
   rateLimit.ts, http.ts           sliding-window limiter, auth middleware, guest-safe views
-  settings.ts, errorLog.ts        persisted admin switches (forceFallback), recent errors
+  settings.ts, errorLog.ts        persisted admin switches (pauseReason), recent errors
   sse.ts                          SSE helper (heartbeat, X-Accel-Buffering), SSE_ROUTES
   admin/auth.ts                   admin cookie sessions (HttpOnly, Secure, SameSite=Strict)
-  routes/{chat,session,admin}.ts  HTTP API (chat answers gated messages with refusals)
+  routes/{chat,session,admin,events}.ts  HTTP API (chat answers gated messages with refusals)
   routes/photos.ts                POST /api/photos/verify, PUT /api/photos/:id/original
   dev/mock-ollama*.ts             mock Ollama (reply/hang/delay/http_error/stream_error/truncate) + blackhole
 apps/server/test/                 vitest + supertest; helpers.ts has makeEnv (in-memory DB, fake clock)

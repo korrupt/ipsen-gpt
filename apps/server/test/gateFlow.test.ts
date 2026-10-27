@@ -22,24 +22,19 @@ import {
 } from './helpers.js';
 
 let primary: MockOllama;
-let fallback: MockOllama;
 let jpeg: Buffer;
 
 beforeAll(async () => {
   primary = await startMockOllama({ tokenDelayMs: 1 });
-  fallback = await startMockOllama({ tokenDelayMs: 1 });
   jpeg = await phoneJpeg({ width: 1600, height: 1200, orientation: 6 });
 });
 afterAll(async () => {
   await primary.close();
-  await fallback.close();
 });
 beforeEach(() => {
   primary.setMode({ kind: 'reply', text: 'from primary' });
   primary.setVerdict('pass');
-  fallback.setMode({ kind: 'reply', text: 'from fallback' });
   primary.requests.length = 0;
-  fallback.requests.length = 0;
 });
 
 const env = (gates: unknown[] = [], o: Record<string, string> = {}) =>
@@ -47,8 +42,6 @@ const env = (gates: unknown[] = [], o: Record<string, string> = {}) =>
     {
       OLLAMA_URL: primary.url,
       OLLAMA_MODEL: 'big:8b',
-      OLLAMA_FALLBACK_URL: fallback.url,
-      OLLAMA_FALLBACK_MODEL: 'small:1b',
       ...o,
     },
     (config) => writeGates(config.gatesPath, gates),
@@ -102,7 +95,6 @@ describe('while a gate is active', () => {
     }
     expect(replies).toEqual(['No pumpkin, no talk.', 'Gourd first.', 'No pumpkin, no talk.']);
     expect(primary.requests).toHaveLength(0);
-    expect(fallback.requests).toHaveLength(0);
     // Still gated, and the refused exchanges are in the history.
     const s = await request(e.app).get('/api/session').set('authorization', `Bearer ${token}`);
     expect(s.body.gate.id).toBe(gateId);
@@ -121,21 +113,27 @@ describe('while a gate is active', () => {
   });
 
   it('if the model cannot make up a refusal, a canned one is used', async () => {
-    const e = env([gateJson('candle', { type: 'session_start' })], { OLLAMA_URL: await refusedUrl(), OLLAMA_FALLBACK_URL: '' });
+    const e = env([gateJson('candle', { type: 'session_start' })], { OLLAMA_URL: await refusedUrl() });
     const { token } = await newGuest(e, 'Kari');
     const events = parseSse((await chat(e, token, 'hi')).text);
     expect(tokenText(events)).toBe(DEFAULT_REFUSALS[0]);
     expect(events.at(-1)?.event).toBe('done');
   });
 
-  it('an after_messages gate answers the triggering message with its demand', async () => {
+  it('an after_messages gate arrives with the reply that reached it, so no message is spent on it', async () => {
     const e = env([gateJson('hat', { type: 'after_messages', count: 2 }, { refusal_lines: ['Hat!'] })]);
     const { token, body } = await newGuest(e, 'Kari');
     expect(body.gate).toBeNull();
-    expect(tokenText(parseSse((await chat(e, token, 'one')).text))).toBe('from primary');
-    expect(tokenText(parseSse((await chat(e, token, 'two')).text))).toBe('from primary');
-    expect(tokenText(parseSse((await chat(e, token, 'three')).text))).toBe('Show me a hat!');
-    expect(tokenText(parseSse((await chat(e, token, 'four')).text))).toBe('Hat!');
+    const one = parseSse((await chat(e, token, 'one')).text);
+    expect(one.map((ev) => ev.event)).not.toContain('gate');
+    const two = parseSse((await chat(e, token, 'two')).text);
+    expect(tokenText(two)).toBe('from primary');
+    // After the reply, before "done": the guest sees the gate before typing again.
+    expect(two.slice(-2)).toEqual([
+      { event: 'gate', data: { id: expect.any(String), prompt: 'Show me a hat!', deadlineAt: null } },
+      { event: 'done', data: {} },
+    ]);
+    expect(tokenText(parseSse((await chat(e, token, 'three')).text))).toBe('Hat!');
     expect(primary.requests).toHaveLength(2);
   });
 });
@@ -196,31 +194,36 @@ describe('photo verification', () => {
     expect(attempt.error).toMatch(/^Reply was not the expected JSON/);
   });
 
-  it('on the fallback (no vision) photos are unverified and the small model is never asked', async () => {
+  it('while the PC is known to be gone, photos are unverified without asking it', async () => {
     const e = env([PUMPKIN]);
     const { token, gateId } = await gatedGuest(e);
-    e.services.settings.set('forceFallback', true);
+    (e.services.llm as unknown as { update(p: object): void }).update({ reachable: false });
     const res = await verify(e, token, gateId, jpeg);
     expect(res.body).toMatchObject({ result: 'unverified', message: VERDICT_LINES.unverified, gate: { id: gateId } });
     expect(primary.requests).toHaveLength(0);
-    expect(fallback.requests).toHaveLength(0);
   });
 
-  it('a dead PC makes photos unverified (and chat moves to the fallback)', async () => {
+  it('a dead PC makes photos unverified and closes chat', async () => {
     const e = env([PUMPKIN], { OLLAMA_URL: await refusedUrl() });
     const { token, gateId } = await gatedGuest(e);
     expect((await verify(e, token, gateId, jpeg)).body).toMatchObject({ result: 'unverified' });
-    expect(visionRequests(fallback)).toHaveLength(0);
-    expect(e.services.llm.plan()).toEqual(['fallback']);
+    expect(e.services.llm.status()).toMatchObject({ open: false, reason: 'disconnected' });
     expect(e.logged).toContain('Photo verification failed');
   });
 
-  it('a bad answer from a live PC does not send chat to the fallback', async () => {
+  it('a bad answer from a live PC does not close chat', async () => {
     const e = env([PUMPKIN]);
     const { token, gateId } = await gatedGuest(e);
     primary.setMode({ kind: 'http_error', status: 400 });
     expect((await verify(e, token, gateId, jpeg)).body).toMatchObject({ result: 'unverified' });
-    expect(e.services.llm.plan()).toEqual(['primary', 'fallback']);
+    expect(e.services.llm.status().open).toBe(true);
+  });
+
+  it('photos can still be verified while chat is paused', async () => {
+    const e = env([PUMPKIN]);
+    const { token, gateId } = await gatedGuest(e);
+    e.services.llm.pause('Speeches');
+    expect((await verify(e, token, gateId, jpeg)).body).toMatchObject({ result: 'passed' });
   });
 
   it('stores every attempt with an EXIF-free resized copy', async () => {

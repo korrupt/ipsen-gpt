@@ -71,7 +71,7 @@ export function photosRouter(config: Config, services: Services): Router {
       log('Photo verification failed', err);
       return unverified(err instanceof Error ? err.message : String(err));
     }
-    if (text === null) return unverified('Vision model unavailable (primary down or forced off)');
+    if (text === null) return unverified('Model unreachable (PC disconnected)');
     const verdict = parseVerdict(text);
     if (!verdict) return unverified(`Reply was not the expected JSON: ${text.slice(0, 300)}`);
     if (!isPass(verdict, config.photos.confidenceMin)) {

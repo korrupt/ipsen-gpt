@@ -63,13 +63,6 @@ remote "set -e
   grep -q '^IPSENGPT_TAG=' .env || echo 'IPSENGPT_TAG=$TAG' >> .env
   docker compose up -d --remove-orphans >/dev/null 2>&1
   set -a; . ./.env; set +a
-  if docker compose ps --services --status running | grep -qx ollama; then
-    model=\${OLLAMA_FALLBACK_MODEL:-llama3.2:1b}
-    docker compose exec -T ollama ollama list | grep -q \"^\$model\" || {
-      echo \"pulling fallback model \$model (first deploy only)\"
-      docker compose exec -T ollama ollama pull \"\$model\" >/dev/null
-    }
-  fi
   for _ in \$(seq 1 60); do
     curl -sf http://127.0.0.1:\${APP_PORT:-3000}/api/health >/dev/null && exit 0
     sleep 1

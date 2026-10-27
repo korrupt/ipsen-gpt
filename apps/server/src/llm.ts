@@ -2,8 +2,6 @@ import type { Config } from './config.js';
 import { OllamaError, streamChat, type ChatMessage, type ChatOptions } from './ollama.js';
 import type { Settings } from './settings.js';
 
-export type Backend = 'primary' | 'fallback';
-
 export interface ProbeResult {
   url: string;
   model: string;
@@ -13,121 +11,130 @@ export interface ProbeResult {
   error: string | null;
 }
 
-export interface LlmStatus {
-  forceFallback: boolean;
-  /** Backend that served the most recent reply. */
-  lastUsed: Backend | null;
-  /** While set, the primary is skipped (it failed recently). */
-  primarySkippedUntil: number | null;
-  primary: ProbeResult;
-  fallback: ProbeResult | null;
+/** Shown to guests while the PC can't be reached. */
+export const DISCONNECTED_MESSAGE = 'IpsenGPT has lost contact with the spirit world. Hang on, it will be back shortly.';
+
+/** Whether guests can chat right now, and if not, what they are told. */
+export type ChatStatus =
+  | { open: true; reason: null; message: null }
+  | { open: false; reason: 'paused' | 'disconnected'; message: string };
+
+export interface ModelState extends ProbeResult {
+  /** When the model was last checked; null before the first check. */
+  checkedAt: number | null;
 }
 
+/** Errors that mean the PC is gone (not merely busy or confused). */
+const DOWN_KINDS = new Set(['connect_timeout', 'unreachable']);
+const isDown = (err: unknown) => err instanceof OllamaError && DOWN_KINDS.has(err.kind);
+
 /**
- * Picks the model for each request: the primary (PC over the tunnel) unless it
- * is forced off or failed recently, else the fallback (small model on the
- * droplet). A primary failure before the first token falls through to the
- * fallback within the same request; failures mid-reply are not retried.
+ * The one model (the PC's Ollama, over the tunnel). Keeps track of whether it
+ * is reachable, from a check every few seconds (index.ts) and from every real
+ * request, and whether the admin paused chat. Calls `onStatusChange` when what
+ * guests see changes.
  */
 export class Llm {
-  private primaryDownUntil = 0;
-  lastUsed: Backend | null = null;
+  private model: ModelState;
+  onStatusChange: (status: ChatStatus) => void = () => {};
 
   constructor(
     private readonly cfg: Config['ollama'],
     private readonly settings: Settings,
     private readonly log: (msg: string, err?: unknown) => void,
     private readonly now: () => number = Date.now,
-  ) {}
-
-  get hasFallback(): boolean {
-    return this.cfg.fallback !== null;
+  ) {
+    // Assume it's up until a check or a request says otherwise, so a restart doesn't close chat.
+    this.model = { url: cfg.url, model: cfg.model, reachable: true, hasModel: true, error: null, checkedAt: null };
   }
 
-  endpoint(backend: Backend): Config['ollama'] {
-    if (backend === 'fallback' && this.cfg.fallback) return { ...this.cfg, ...this.cfg.fallback };
-    return this.cfg;
+  get connected(): boolean {
+    return this.model.reachable && this.model.hasModel;
   }
 
-  /** Backends to try, in order. */
-  plan(): Backend[] {
-    if (!this.cfg.fallback) return ['primary'];
-    if (this.settings.get('forceFallback')) return ['fallback'];
-    if (this.now() < this.primaryDownUntil) return ['fallback'];
-    return ['primary', 'fallback'];
+  status(): ChatStatus {
+    const pauseReason = this.settings.get('pauseReason');
+    if (pauseReason) return { open: false, reason: 'paused', message: pauseReason };
+    if (!this.connected) return { open: false, reason: 'disconnected', message: DISCONNECTED_MESSAGE };
+    return { open: true, reason: null, message: null };
   }
 
-  /** Streams reply deltas. `onBackend` is called once the serving backend is known. */
-  async *chat(
-    messages: ChatMessage[],
-    signal?: AbortSignal,
-    onBackend?: (b: Backend) => void,
-  ): AsyncGenerator<string, void, void> {
-    const order = this.plan();
-    for (const [i, backend] of order.entries()) {
-      const gen = streamChat(this.endpoint(backend), messages, signal);
-      let first: IteratorResult<string, void>;
-      try {
-        first = await gen.next();
-      } catch (err) {
-        const isAbort = err instanceof OllamaError && err.kind === 'aborted';
-        if (!isAbort && backend === 'primary') this.markPrimaryDown(err);
-        if (isAbort || i === order.length - 1) throw err;
-        continue;
-      }
-      if (backend === 'primary') this.primaryDownUntil = 0;
-      this.lastUsed = backend;
-      onBackend?.(backend);
-      if (!first.done) yield first.value;
-      yield* gen;
-      return;
+  /** Probes the model now. Never throws. */
+  async check(): Promise<ModelState> {
+    const result = await probe(this.cfg.url, this.cfg.model, this.cfg.connectTimeoutMs);
+    if (this.connected && !(result.reachable && result.hasModel)) this.log(`Model check failed, chat closed: ${result.error}`);
+    this.update(result);
+    return this.model;
+  }
+
+  modelState(): ModelState {
+    return { ...this.model };
+  }
+
+  /** Pauses chat for everyone with a reason guests see, or resumes it (null). */
+  pause(reason: string | null): void {
+    const before = this.status();
+    this.settings.set('pauseReason', reason);
+    this.emitIfChanged(before);
+  }
+
+  /** Streams reply deltas from the model. */
+  async *chat(messages: ChatMessage[], signal?: AbortSignal): AsyncGenerator<string, void, void> {
+    const gen = streamChat(this.cfg, messages, signal);
+    let first: IteratorResult<string, void>;
+    try {
+      first = await gen.next();
+    } catch (err) {
+      if (isDown(err)) this.markDown(err);
+      throw err;
     }
+    this.markUp();
+    if (!first.done) yield first.value;
+    yield* gen;
   }
 
   /**
-   * A complete reply from the primary, the only model that can see images.
-   * Null when the primary is off limits (forced off, or failed recently);
-   * throws OllamaError if it fails now. Never falls back.
+   * A complete reply for photo verification. Null when the model is known to be
+   * unreachable; throws OllamaError if it fails now.
    */
   async vision(
     messages: ChatMessage[],
     opts: ChatOptions & { timeoutMs: number },
     signal?: AbortSignal,
   ): Promise<string | null> {
-    if (this.plan()[0] !== 'primary') return null;
+    if (!this.connected) return null;
     let text = '';
     try {
       for await (const delta of streamChat({ ...this.cfg, replyTimeoutMs: opts.timeoutMs }, messages, signal, opts)) {
         text += delta;
       }
     } catch (err) {
-      // Only "the PC is gone or swamped" sends chat to the fallback; a bad image
-      // or a slow verdict says nothing about the primary's health.
-      const down = err instanceof OllamaError && ['connect_timeout', 'unreachable', 'first_token_timeout'].includes(err.kind);
-      if (down) this.markPrimaryDown(err);
+      // Only "the PC is gone" closes chat; a bad image or a slow verdict says nothing about its health.
+      if (isDown(err)) this.markDown(err);
       throw err;
     }
-    this.primaryDownUntil = 0;
+    this.markUp();
     return text;
   }
 
-  private markPrimaryDown(err: unknown) {
-    this.primaryDownUntil = this.now() + this.cfg.primaryRetryMs;
-    this.log(this.cfg.fallback ? 'Primary model failed, using fallback' : 'Primary model failed', err);
+  private markDown(err: unknown) {
+    if (this.connected) this.log('Model unreachable, chat closed until it is back', err);
+    this.update({ reachable: false, error: err instanceof Error ? err.message : String(err) });
   }
 
-  async status(): Promise<LlmStatus> {
-    const [primary, fallback] = await Promise.all([
-      probe(this.cfg.url, this.cfg.model),
-      this.cfg.fallback ? probe(this.cfg.fallback.url, this.cfg.fallback.model) : Promise.resolve(null),
-    ]);
-    return {
-      forceFallback: this.settings.get('forceFallback'),
-      lastUsed: this.lastUsed,
-      primarySkippedUntil: this.now() < this.primaryDownUntil ? this.primaryDownUntil : null,
-      primary,
-      fallback,
-    };
+  private markUp() {
+    if (!this.model.reachable) this.update({ reachable: true, hasModel: true, error: null });
+  }
+
+  private update(patch: Partial<ProbeResult>) {
+    const before = this.status();
+    this.model = { ...this.model, ...patch, checkedAt: this.now() };
+    this.emitIfChanged(before);
+  }
+
+  private emitIfChanged(before: ChatStatus) {
+    const after = this.status();
+    if (after.open !== before.open || after.message !== before.message) this.onStatusChange(after);
   }
 }
 
@@ -140,7 +147,8 @@ export async function probe(url: string, model: string, timeoutMs = 2000): Promi
     const names = (body.models ?? []).flatMap((m) => [m.name, m.model]).filter(Boolean) as string[];
     // "llama3.2:1b" matches "llama3.2:1b"; a bare "name" matches "name:latest".
     const wanted = model.includes(':') ? [model] : [model, `${model}:latest`];
-    return { url, model, reachable: true, hasModel: names.some((n) => wanted.includes(n)), error: null };
+    const hasModel = names.some((n) => wanted.includes(n));
+    return { url, model, reachable: true, hasModel, error: hasModel ? null : `Model ${model} is not pulled` };
   } catch (err) {
     return { url, model, reachable: false, hasModel: false, error: err instanceof Error ? err.message : String(err) };
   }

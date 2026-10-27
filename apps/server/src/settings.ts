@@ -2,11 +2,12 @@ import type { Db } from './db.js';
 
 /** Runtime switches the admin can flip; persisted so a restart keeps them. */
 export interface SettingValues {
-  forceFallback: boolean;
+  /** Set while the admin has paused chat; shown to guests as the reason. */
+  pauseReason: string | null;
 }
 
 const DEFAULTS: SettingValues = {
-  forceFallback: false,
+  pauseReason: null,
 };
 
 export class Settings {
@@ -24,6 +25,6 @@ export class Settings {
   }
 
   all(): SettingValues {
-    return { forceFallback: this.get('forceFallback') };
+    return { pauseReason: this.get('pauseReason') };
   }
 }

@@ -88,7 +88,7 @@ kill "$MOCK_PID"
 t0=$(date +%s%N)
 remote_curl http://127.0.0.1:11435/api/version >/dev/null 2>&1 && fail "still reachable with Ollama down" || true
 ms=$(( ($(date +%s%N) - t0) / 1000000 ))
-(( ms < 2500 )) && pass "with Ollama down on the PC, the droplet fails fast (${ms} ms) -> app uses fallback" \
+(( ms < 2500 )) && pass "with Ollama down on the PC, the droplet fails fast (${ms} ms) -> app closes chat" \
   || fail "slow failure when Ollama is down (${ms} ms)"
 
 printf '\n\033[32m%d checks passed\033[0m\n' "$PASS"

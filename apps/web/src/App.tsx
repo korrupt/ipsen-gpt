@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChatClosedBanner } from './components/ChatClosedBanner';
 import { ClaimBanner } from './components/ClaimBanner';
 import { Composer } from './components/Composer';
 import { GatePanel } from './components/GatePanel';
@@ -7,6 +8,7 @@ import { MessageList, type Message } from './components/MessageList';
 import { NamePicker } from './components/NamePicker';
 import { useVisualViewport } from './hooks/useVisualViewport';
 import { sendChat } from './lib/chatApi';
+import { connectEvents, OPEN, type ChatStatus } from './lib/events';
 import type { GateView, VerifyResult } from './lib/photos';
 import {
   ApiError,
@@ -42,6 +44,8 @@ export function App() {
   const [gate, setGate] = useState<GateView | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
+  /** Whether chat is open (the PC is reachable and the host hasn't paused it); pushed live. */
+  const [chatStatus, setChatStatus] = useState<ChatStatus>(OPEN);
   const abortRef = useRef<AbortController | null>(null);
 
   /** Applies a fresh session view from the server and picks the right screen. */
@@ -73,7 +77,14 @@ export function App() {
     if (getToken()) void load();
   }, [load]);
 
-  // While a claim is pending, check for approval/rejection. (Phase 5 replaces this with live events.)
+  // Live updates while chatting: gates the moment they start, and whether chat is open.
+  const inChat = screen.kind === 'chat';
+  useEffect(() => {
+    if (!inChat) return;
+    return connectEvents({ onStatus: setChatStatus, onGate: setGate, onSessionGone: sessionGone });
+  }, [inChat, sessionGone]);
+
+  // While a claim is pending, check for approval/rejection. (Phase 5 moves this onto the live events.)
   useEffect(() => {
     if (session?.state !== 'pending_claim') return;
     const timer = setInterval(async () => {
@@ -133,6 +144,10 @@ export function App() {
           sessionGone();
         } else if (err instanceof ApiError && err.code === 'name_required') {
           void load();
+        } else if (err instanceof ApiError && err.code === 'chat_closed') {
+          // Closed before the live update got here. Take the message back; it was never sent.
+          setMessages(prior);
+          setChatStatus({ open: false, reason: null, message: err.message });
         } else {
           const message = err instanceof ApiError ? err.message : 'Something went wrong. Try again.';
           patchLast(() => ({ status: 'error', content: message }));
@@ -192,7 +207,8 @@ export function App() {
           {session?.state === 'pending_claim' && session.claimCode && <ClaimBanner code={session.claimCode} />}
           <MessageList messages={messages} onRetry={onRetry} />
           {gate && <GatePanel gate={gate} onResult={onGateResult} onSessionGone={sessionGone} onExpired={onGateExpired} />}
-          <Composer streaming={streaming} onSend={onSend} onStop={onStop} />
+          {!chatStatus.open && chatStatus.message && <ChatClosedBanner message={chatStatus.message} />}
+          <Composer streaming={streaming} disabled={!chatStatus.open} onSend={onSend} onStop={onStop} />
         </>
       )}
     </div>

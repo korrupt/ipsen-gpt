@@ -5,6 +5,7 @@ import type { Config } from './config.js';
 import { loadPersona } from './prompt.js';
 import { adminRouter } from './routes/admin.js';
 import { chatRouter } from './routes/chat.js';
+import { eventsRouter } from './routes/events.js';
 import { photosRouter } from './routes/photos.js';
 import { sessionRouter } from './routes/session.js';
 import type { Services } from './services.js';
@@ -38,6 +39,7 @@ export function createApp({ config, services, getPersona, log = services.log }: 
     }),
   );
   api.use(photosRouter(config, services));
+  api.use(eventsRouter(config, services));
   api.use('/admin', adminRouter(config, services));
   api.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });

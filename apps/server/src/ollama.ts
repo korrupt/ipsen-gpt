@@ -66,7 +66,7 @@ const isAbortError = (err: unknown) => err instanceof Error && (err.name === 'Ab
  *  - refused connection                                  -> `unreachable` (immediately)
  *  - health check silent for connectTimeoutMs            -> `connect_timeout`
  *  - alive, but no first token within firstTokenTimeoutMs -> `first_token_timeout`
- * All of these happen before any output, so the caller can switch to a fallback.
+ * All of these happen before any output, so the caller knows no partial reply was shown.
  */
 export async function* streamChat(
   cfg: Config['ollama'],

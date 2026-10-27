@@ -115,25 +115,54 @@ describe('gate store', () => {
     expect(gates().current(kari)?.defKey).toBe(`${ola}/carrot`);
   });
 
-  it('after_messages gates fire once the guest has sent that many messages', () => {
+  it('after_messages gates fire right after the reply to that many messages', () => {
     setGates([gateJson('hat', { type: 'after_messages', count: 2 })]);
     const subject = { id: kari, personSlug: null };
-    expect(gates().beforeChat(subject, 0).gate).toBeUndefined();
-    expect(gates().beforeChat(subject, 1).gate).toBeUndefined();
-    const third = gates().beforeChat(subject, 2);
-    expect(third).toMatchObject({ triggered: true, gate: { defKey: 'global/hat' } });
-    // Still blocked on the next message, but not newly triggered.
-    expect(gates().beforeChat(subject, 3)).toMatchObject({ triggered: false, gate: { id: third.gate!.id } });
+    expect(gates().afterReply(subject, 1)).toBeUndefined();
+    const hat = gates().afterReply(subject, 2);
+    expect(hat).toMatchObject({ defKey: 'global/hat', source: 'after_messages' });
+    expect(gates().current(kari)?.id).toBe(hat!.id);
+    // Already facing it: nothing new fires.
+    expect(gates().afterReply(subject, 3)).toBeUndefined();
     // Passed gates don't come back.
-    gates().pass(third.gate!.id);
-    expect(gates().beforeChat(subject, 9).gate).toBeUndefined();
+    gates().pass(hat!.id);
+    expect(gates().afterReply(subject, 9)).toBeUndefined();
+    expect(gates().current(kari)).toBeUndefined();
+  });
+
+  it('an after_messages gate waits while another gate is active', () => {
+    setGates([gateJson('hat', { type: 'after_messages', count: 1 })]);
+    const [cat] = gates().force([kari], { custom: { target: 'a cat', guestPrompt: 'Cat!' } }, null);
+    expect(gates().afterReply({ id: kari, personSlug: null }, 1)).toBeUndefined();
+    gates().pass(cat!.id);
+    expect(gates().afterReply({ id: kari, personSlug: null }, 2)?.defKey).toBe('global/hat');
   });
 
   it("person after_messages gates only apply to that person's holder", () => {
     const ola = e.services.people.save({ name: 'Ola', aliases: [], info: '' }).slug;
     writeGates(path.join(e.config.peopleDir, ola, 'gates.json'), [gateJson('carrot', { type: 'after_messages', count: 1 })]);
-    expect(gates().beforeChat({ id: kari, personSlug: null }, 5).gate).toBeUndefined();
-    expect(gates().beforeChat({ id: kari, personSlug: ola }, 5).gate?.defKey).toBe(`${ola}/carrot`);
+    expect(gates().afterReply({ id: kari, personSlug: null }, 5)).toBeUndefined();
+    expect(gates().afterReply({ id: kari, personSlug: ola }, 5)?.defKey).toBe(`${ola}/carrot`);
+  });
+
+  it('reports which sessions changed, once per batch and after the change is stored', async () => {
+    const reports: string[][] = [];
+    gates().onChange = (ids) => reports.push(ids.map((id) => `${id}:${gates().current(id)?.guestPrompt ?? 'none'}`));
+    const per = e.services.sessions.create('Per').session.id;
+    const forced = gates().force([kari, per], { custom: { target: 'a cat', guestPrompt: 'Cat!' } }, 60_000);
+    expect(reports).toEqual([]); // not inside the transaction
+    await Promise.resolve();
+    expect(reports).toEqual([[`${kari}:Cat!`, `${per}:Cat!`]]);
+
+    gates().cancel(forced[0]!.id);
+    await Promise.resolve();
+    expect(reports.at(-1)).toEqual([`${kari}:none`]);
+
+    // Deadlines expire on the next look (the 5 s tick in production).
+    e.tick(60_000);
+    gates().tick(() => [], () => undefined);
+    await Promise.resolve();
+    expect(reports.at(-1)).toEqual([`${per}:none`]);
   });
 
   it('the oldest active gate is the one the guest faces', () => {

@@ -41,14 +41,20 @@ export interface ProbeResult {
   error: string | null;
 }
 
+export interface ChatStatus {
+  open: boolean;
+  reason: 'paused' | 'disconnected' | null;
+  message: string | null;
+}
+
 export interface SystemStatus {
-  llm: {
-    forceFallback: boolean;
-    lastUsed: 'primary' | 'fallback' | null;
-    primarySkippedUntil: number | null;
-    primary: ProbeResult;
-    fallback: ProbeResult | null;
-  };
+  /** Checked live when the System tab asks. */
+  model: ProbeResult & { checkedAt: number | null };
+  /** What guests see right now. */
+  status: ChatStatus;
+  pauseReason: string | null;
+  /** Open live-event streams (roughly: guests with the page open). */
+  listeners: number;
   errors: { at: number; message: string; detail: string }[];
 }
 
@@ -171,8 +177,8 @@ export const adminApi = {
   endSession: (id: string) => call<{ ok: true }>('POST', `/sessions/${id}/end`, {}),
 
   system: () => call<SystemStatus>('GET', '/system'),
-  setForceFallback: (enabled: boolean) =>
-    call<{ forceFallback: boolean }>('POST', '/system/force-fallback', { enabled }),
+  pause: (reason: string) => call<{ pauseReason: string; status: ChatStatus }>('PUT', '/system/pause', { reason }),
+  resume: () => call<{ pauseReason: null; status: ChatStatus }>('DELETE', '/system/pause'),
 
   gates: () => call<{ definitions: GateDefinition[]; errors: string[]; active: AdminGate[] }>('GET', '/gates'),
   forceGate: (input: ForceGateInput) => call<{ count: number }>('POST', '/gates/force', input),
