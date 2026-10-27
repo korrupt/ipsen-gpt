@@ -107,6 +107,14 @@ describe('nginx site', () => {
   it('proxies only to the loopback app', () => {
     for (const m of nginx.matchAll(/proxy_pass\s+([^;]+);/g)) expect(m[1]).toBe('http://127.0.0.1:3000');
   });
+
+  it('takes the domain from setup.sh (no hardcoded hostname)', () => {
+    for (const m of nginx.matchAll(/server_name\s+([^;]+);/g)) expect(m[1]).toBe('__DOMAIN__');
+    for (const m of nginx.matchAll(/ssl_certificate(?:_key)?\s+([^;]+);/g)) {
+      expect(m[1]).toMatch(/^\/etc\/letsencrypt\/live\/__DOMAIN__\//);
+    }
+    expect(nginx).not.toMatch(/ipsen\.no/);
+  });
 });
 
 describe('ssh hardening and tunnel', () => {

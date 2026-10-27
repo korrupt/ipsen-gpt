@@ -16,9 +16,10 @@ tmp="$DEST.partial"
 rm -rf "$tmp"
 mkdir -p "$tmp"
 
-# sqlite3 .backup is safe while the app is writing (WAL mode).
+# sqlite3 .backup is safe while the app is writing (WAL mode). The timeout
+# waits out a brief lock (e.g. a checkpoint) instead of failing, like the app does.
 if [[ -f $APP_ROOT/db/ipsengpt.sqlite ]]; then
-  sqlite3 "$APP_ROOT/db/ipsengpt.sqlite" ".backup '$tmp/ipsengpt.sqlite'"
+  sqlite3 -cmd '.timeout 5000' "$APP_ROOT/db/ipsengpt.sqlite" ".backup '$tmp/ipsengpt.sqlite'"
   [[ $(sqlite3 "$tmp/ipsengpt.sqlite" 'PRAGMA integrity_check') == ok ]] || { echo "backup failed integrity check" >&2; exit 1; }
 fi
 

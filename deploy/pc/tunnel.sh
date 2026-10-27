@@ -5,7 +5,7 @@
 # Windows this also keeps WSL alive).
 #
 # Settings (env vars, or ~/.config/ipsengpt/tunnel.env):
-#   TUNNEL_HOST   droplet IP or a DNS-only name. NOT artifical.ipsen.no: that
+#   TUNNEL_HOST   droplet IP or a DNS-only name. NOT chat.ipsen.no: that
 #                 name goes through Cloudflare's proxy, which doesn't carry SSH.
 #   TUNNEL_KEY    private key (default ~/.ssh/ipsengpt_tunnel)
 #   TUNNEL_PORT   ssh port (default 22)

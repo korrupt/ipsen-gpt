@@ -135,6 +135,10 @@ Admin → System shows both models, lets you force the fallback, and lists recen
 
 ### 0. Cloudflare
 
+- DNS: a **proxied** (orange cloud) `A` record `chat` → the droplet's IP. Keep the name one level
+  below `ipsen.no`: Cloudflare's free edge certificate covers `*.ipsen.no` only, so a name like
+  `chat.open.ipsen.no` would show guests a certificate error. Another hostname works with
+  `setup.sh --domain <name>`.
 - SSL/TLS mode: **Full (strict)**. The origin gets a Let's Encrypt cert through the DNS challenge.
 - Create an API token: *My Profile → API Tokens → Create Token → Edit zone DNS*, limited to
   the `ipsen.no` zone. `setup.sh` asks for it once and stores it in `/root/.secrets/cloudflare.ini` (mode 600).
@@ -207,7 +211,7 @@ container restarts never touch it.
 ### 4. Verify on the real droplet
 
 ```bash
-curl -s https://artifical.ipsen.no/api/health
+curl -s https://chat.ipsen.no/api/health
 ```
 ```bash
 ssh <you>@<droplet-ip> 'sudo ss -ltnp | grep -v 127.0.0. ; sudo ufw status'

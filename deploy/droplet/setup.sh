@@ -6,18 +6,19 @@
 #       --admin-user <name> --tunnel-key "<contents of ~/.ssh/ipsengpt_tunnel.pub>" \
 #       --email <you@example.com>
 #
+# --domain <name> serves another hostname (default chat.ipsen.no).
 # Steps can be skipped with --skip <step> (repeatable):
 #   swap admin tunnel sshd firewall packages docker dirs cert nginx backup
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
-DOMAIN=artifical.ipsen.no
+DOMAIN=chat.ipsen.no
 ADMIN_USER=''
 TUNNEL_KEY=''
 EMAIL=''
 SKIP=()
 
-usage() { sed -n '2,12p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,11p' "$0"; exit "${1:-0}"; }
 while [[ $# -gt 0 ]]; do
   case $1 in
     --admin-user) ADMIN_USER=$2; shift 2 ;;
@@ -45,7 +46,7 @@ skip firewall || setup_firewall
 skip docker   || install_docker
 skip dirs     || setup_dirs "$ADMIN_USER"
 skip cert     || issue_certificate "$DOMAIN" "$EMAIL"
-skip nginx    || install_nginx_site
+skip nginx    || install_nginx_site "$DOMAIN"
 skip backup   || install_backup_cron
 
 log "done. Next: on your PC run deploy/deploy.sh (see README, 'Deploy')."

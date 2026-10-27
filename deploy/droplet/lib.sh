@@ -138,9 +138,19 @@ setup_dirs() { # [admin user who deploys]
   log "dirs: data in $APP_ROOT/{db,people,photos}, backups in $APP_ROOT/backups"
 }
 
-install_nginx_site() {
+# Prints the Nginx site for a domain (the template has __DOMAIN__ placeholders).
+render_nginx_site() { # domain
+  local domain=$1
+  [[ $domain =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || die "not a domain name: $domain"
+  sed "s/__DOMAIN__/$domain/g" "$SCRIPT_DIR/nginx/ipsengpt.conf"
+}
+
+install_nginx_site() { # domain
+  local site
+  site=$(render_nginx_site "$1")
   "$SCRIPT_DIR/cloudflare-realip.sh" /etc/nginx/conf.d/cloudflare-realip.conf
-  install -m 644 "$SCRIPT_DIR/nginx/ipsengpt.conf" /etc/nginx/sites-available/ipsengpt
+  printf '%s\n' "$site" > /etc/nginx/sites-available/ipsengpt
+  chmod 644 /etc/nginx/sites-available/ipsengpt
   ln -sf /etc/nginx/sites-available/ipsengpt /etc/nginx/sites-enabled/ipsengpt
   rm -f /etc/nginx/sites-enabled/default
   nginx -t || die "nginx config invalid"

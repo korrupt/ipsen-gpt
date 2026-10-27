@@ -2,6 +2,9 @@
 # Validates deploy/droplet/nginx/ipsengpt.conf: syntax (as installed, with the
 # real Cloudflare snippet) and behaviour (in front of a stub upstream).
 source "$(dirname "$0")/lib.sh"
+# render_nginx_site, the same function setup.sh uses.
+# shellcheck source=../droplet/lib.sh
+source "$DEPLOY_DIR/droplet/lib.sh"
 
 # Same major version as Ubuntu 24.04's nginx package (1.24).
 NGINX_IMAGE=nginx:1.24-alpine
@@ -16,15 +19,26 @@ cleanup() {
   rm -rf "$WORK"
 }
 trap cleanup EXIT
+DOMAIN=chat.ipsen.no
+
+step "Rendering the site template"
+site=$(render_nginx_site "$DOMAIN")
+assert_not_contains "$site" "__DOMAIN__" "every __DOMAIN__ placeholder is replaced"
+assert_contains "$site" "server_name $DOMAIN;" "server_name is the domain"
+assert_contains "$site" "/etc/letsencrypt/live/$DOMAIN/fullchain.pem;" "certificate path follows the domain"
+for bad in 'evil.com; include /etc/passwd' 'nodot' '-x.ipsen.no' 'Chat.ipsen.no'; do
+  (render_nginx_site "$bad" >/dev/null 2>&1) && fail "accepted bad domain: $bad"
+done
+pass "rejects values that aren't lowercase domain names"
 
 step "Syntax check of the production config, as setup.sh installs it"
-mkdir -p "$WORK/prod/conf.d" "$WORK/prod/sites" "$WORK/prod/le/live/artifical.ipsen.no"
-openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=artifical.ipsen.no \
-  -keyout "$WORK/prod/le/live/artifical.ipsen.no/privkey.pem" \
-  -out "$WORK/prod/le/live/artifical.ipsen.no/fullchain.pem" >/dev/null 2>&1
+mkdir -p "$WORK/prod/conf.d" "$WORK/prod/sites" "$WORK/prod/le/live/$DOMAIN"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$DOMAIN" \
+  -keyout "$WORK/prod/le/live/$DOMAIN/privkey.pem" \
+  -out "$WORK/prod/le/live/$DOMAIN/fullchain.pem" >/dev/null 2>&1
 "$DEPLOY_DIR/droplet/cloudflare-realip.sh" "$WORK/prod/conf.d/cloudflare-realip.conf" >/dev/null
 pass "cloudflare-realip.sh fetched $(grep -c set_real_ip_from "$WORK/prod/conf.d/cloudflare-realip.conf") ranges"
-cp "$DEPLOY_DIR/droplet/nginx/ipsengpt.conf" "$WORK/prod/sites/"
+printf '%s\n' "$site" > "$WORK/prod/sites/ipsengpt"
 cat > "$WORK/prod/nginx.conf" <<'CONF'
 events {}
 http {
@@ -51,7 +65,7 @@ sed -e "s/listen 80;/listen $HTTP_PORT;/; s/listen \[::\]:80;/listen [::]:$HTTP_
     -e "s/listen 443 ssl;/listen $HTTPS_PORT ssl;/; s/listen \[::\]:443 ssl;/listen [::]:$HTTPS_PORT ssl;/" \
     -e "s#127.0.0.1:3000#127.0.0.1:$UPSTREAM_PORT#g" \
     -e "s#return 301 https://\$host\$request_uri;#return 301 https://\$host:$HTTPS_PORT\$request_uri;#" \
-    "$DEPLOY_DIR/droplet/nginx/ipsengpt.conf" > "$WORK/run/conf.d/ipsengpt.conf"
+    <<< "$site" > "$WORK/run/conf.d/ipsengpt.conf"
 # In the test, "Cloudflare" is localhost.
 printf 'set_real_ip_from 127.0.0.1;\nreal_ip_header CF-Connecting-IP;\n' > "$WORK/run/conf.d/00-realip.conf"
 docker run -d --name "$NAME" --network host \
@@ -59,17 +73,17 @@ docker run -d --name "$NAME" --network host \
   -v "$WORK/prod/le:/etc/letsencrypt:ro" \
   "$NGINX_IMAGE" >/dev/null
 BASE="https://127.0.0.1:$HTTPS_PORT"
-H=(-H 'Host: artifical.ipsen.no')
+H=(-H "Host: $DOMAIN")
 wait_for 10 curl -sk "${H[@]}" "$BASE/" || { docker logs "$NAME"; fail "nginx did not start"; }
 
 loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${H[@]}" "http://127.0.0.1:$HTTP_PORT/x?y=1")
-assert_eq "$loc" "https://artifical.ipsen.no:$HTTPS_PORT/x?y=1" "http redirects to https"
+assert_eq "$loc" "https://$DOMAIN:$HTTPS_PORT/x?y=1" "http redirects to https"
 
 echo_json=$(curl -sk "${H[@]}" -H 'CF-Connecting-IP: 203.0.113.7' -H 'X-Forwarded-For: 6.6.6.6' "$BASE/echo")
 assert_contains "$echo_json" '"xff":"203.0.113.7"' "app sees the real client IP from Cloudflare"
 assert_not_contains "$echo_json" '6.6.6.6' "client-supplied X-Forwarded-For is dropped"
 assert_contains "$echo_json" '"proto":"https"' "X-Forwarded-Proto is https"
-assert_contains "$echo_json" '"host":"artifical.ipsen.no"' "Host is passed through"
+assert_contains "$echo_json" "\"host\":\"$DOMAIN\"" "Host is passed through"
 
 headers=$(curl -skI "${H[@]}" "$BASE/echo" | tr "[:upper:]" "[:lower:]")
 assert_contains "$headers" "x-content-type-options: nosniff" "security headers set"
@@ -77,12 +91,13 @@ assert_contains "$headers" "x-content-type-options: nosniff" "security headers s
 # Seconds until the first *body* bytes arrive (curl's time_starttransfer only
 # covers headers, which Nginx sends immediately even when buffering the body).
 first_body_byte() {
-  python3 - "$1" <<'PY'
+  python3 - "$1" "$DOMAIN" <<'PY'
 import socket, ssl, sys, time
 port, path = sys.argv[1].split(" ", 1)
+domain = sys.argv[2]
 ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
-s = ctx.wrap_socket(socket.create_connection(("127.0.0.1", int(port))), server_hostname="artifical.ipsen.no")
-s.sendall(f"POST {path} HTTP/1.1\r\nHost: artifical.ipsen.no\r\nContent-Length: 0\r\n\r\n".encode())
+s = ctx.wrap_socket(socket.create_connection(("127.0.0.1", int(port))), server_hostname=domain)
+s.sendall(f"POST {path} HTTP/1.1\r\nHost: {domain}\r\nContent-Length: 0\r\n\r\n".encode())
 t0, buf = time.time(), b""
 while b"event: first" not in buf:
     chunk = s.recv(4096)

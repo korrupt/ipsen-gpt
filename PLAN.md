@@ -4,7 +4,7 @@ A full-screen, mobile-first chat website for a Halloween costume. Guests scan a 
 
 - **Character name:** IpsenGPT
 - **Character description / voice:** TODO
-- **Domain:** artifical.ipsen.no
+- **Domain:** chat.ipsen.no
 - **Photo gate targets:** TODO (defined in `gates.json`, plus per-person gates)
 
 ## Tech stack

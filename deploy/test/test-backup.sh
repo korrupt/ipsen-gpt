@@ -18,7 +18,8 @@ out=$(docker run --rm -v "$DEPLOY_DIR/droplet:/setup:ro" "$IMAGE" bash -euo pipe
   head -c 100000 /dev/urandom > $APP_ROOT/photos/a.jpg
 
   # A writer hammering the DB while backups run (the app keeps writing at the party).
-  ( for i in $(seq 1 3000); do sqlite3 $db "INSERT INTO t (v) VALUES (\"row$i\")"; done ) &
+  # It waits on locks like the app does (busy_timeout = 5000 in apps/server/src/db.ts).
+  ( for i in $(seq 1 3000); do sqlite3 -cmd ".timeout 5000" $db "INSERT INTO t (v) VALUES (\"row$i\")"; done ) &
   writer=$!
   sleep 0.5
   /setup/backup.sh >/dev/null

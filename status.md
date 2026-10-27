@@ -1,7 +1,7 @@
 # Project status: IpsenGPT
 
 Handover notes for the next agent. Read with [PLAN.md](PLAN.md) (the spec), [CLAUDE.md](CLAUDE.md)
-(working rules) and [README.md](README.md) (how to run and deploy). Last updated 2026-10-25.
+(working rules) and [README.md](README.md) (how to run and deploy). Last updated 2026-10-26.
 
 ## Working rules (from the user)
 
@@ -25,9 +25,8 @@ Handover notes for the next agent. Read with [PLAN.md](PLAN.md) (the spec), [CLA
 | 7. Hardening & load tests | not started | |
 | 8. Skin pass | not started | |
 
-Gates at last run: `pnpm check` passes (typecheck, 198 server + 49 web tests, build).
-`pnpm test:deploy` last passed on native Ubuntu (86 checks); **not run in WSL yet: Docker isn't installed
-here.** Phase 4 changed the Dockerfile, deploy.sh and test-deploy.sh, so run it before deploying.
+Gates at last run (2026-10-26, native Linux, after the switch to `chat.ipsen.no`): `pnpm check` passes
+(typecheck, 199 server + 49 web tests, build) and `pnpm test:deploy` passes (all 7 suites, Phase 4 changes included).
 
 ## Decisions made with the user
 
@@ -38,9 +37,12 @@ here.** Phase 4 changed the Dockerfile, deploy.sh and test-deploy.sh, so run it 
 - **Reserved names:** several guests may claim the same person in parallel. Approving one
   renames that session to the person's display name; the other claimants get a notice and must
   pick a new name.
+- **Domain: `chat.ipsen.no`** (was `artifical.ipsen.no`; switched before the first real deploy). It must
+  stay one level below `ipsen.no`, since Cloudflare's free edge certificate only covers `*.ipsen.no`. The
+  Nginx site is a template (`__DOMAIN__`) filled in by `setup.sh --domain`.
 - **Domain is behind Cloudflare** (orange cloud). TLS: certbot with the **Cloudflare DNS plugin**,
   SSL mode Full (strict). Nginx restores real IPs from `CF-Connecting-IP` (trusted from Cloudflare's
-  ranges only). SSH and the tunnel must use the droplet IP or a DNS-only name, never `artifical.ipsen.no`.
+  ranges only). SSH and the tunnel must use the droplet IP or a DNS-only name, never `chat.ipsen.no`.
 - **Droplet:** the `ipsen.no` host in the user's SSH config, fresh Ubuntu 24.04.
 - **Images:** built on the PC and shipped with `docker save | ssh docker load` (no registry).
 - **Fallback timeouts** (see `apps/server/src/ollama.ts`): connection refused → fall back at once;
