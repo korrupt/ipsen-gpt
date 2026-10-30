@@ -8,10 +8,12 @@ import { LeaderboardSheet } from './components/LeaderboardSheet';
 import { Toast } from './components/Toast';
 import { MessageList, type Message } from './components/MessageList';
 import { NamePicker } from './components/NamePicker';
+import { SecretSheet } from './components/SecretSheet';
 import { useVisualViewport } from './hooks/useVisualViewport';
 import { sendChat } from './lib/chatApi';
 import { connectEvents, OPEN, rewardGoal, type ChatStatus, type Scoreboard, type Standing } from './lib/events';
 import type { GateView, VerifyResult } from './lib/photos';
+import type { GuessResult, SecretView } from './lib/secret';
 import {
   ApiError,
   chooseName,
@@ -59,6 +61,9 @@ export function App() {
   const [standing, setStanding] = useState<Standing | null>(null);
   const [board, setBoard] = useState<Scoreboard | null>(null);
   const [showScores, setShowScores] = useState(false);
+  /** The secrets game (pushed live; off until the host switches it on). */
+  const [secret, setSecret] = useState<SecretView>({ enabled: false });
+  const [showSecret, setShowSecret] = useState(false);
   /** A short notice: points from the host, a reward won. */
   const [toast, setToast] = useState<string | null>(null);
   const clearToast = useCallback(() => setToast(null), []);
@@ -126,6 +131,7 @@ export function App() {
       onStanding: setStanding,
       onScoreboard: setBoard,
       onPointsAwarded: ({ amount, reason }) => setToast(`${amount > 0 ? '+' : ''}${amount} points: ${reason}`),
+      onSecret: setSecret,
       onRewardWon: (r) => setToast(`You won! ${rewardGoal(r)}${r.prize ? `: ${r.prize}` : '. Find SadGPT\'s human for your prize.'}`),
     });
   }, [inChat, sessionGone]);
@@ -140,6 +146,16 @@ export function App() {
       })
       .catch(() => {});
   }, []);
+
+  /** A right guess: SadGPT says so in the chat, and the next level (and maybe its photo gate) begins. */
+  const onSecretSolved = useCallback((r: GuessResult) => {
+    setShowSecret(false);
+    setSecret(r.secret);
+    if (r.gate) setGate(r.gate);
+    setMessages((ms) => [...ms, { id: newId(), role: 'assistant', content: r.message, status: 'done' }]);
+    if (r.points) setToast(`+${r.points} points: you found the secret`);
+  }, []);
+  const closeSecret = useCallback(() => setShowSecret(false), []);
 
   // While a claim is pending, check for approval/rejection. (Phase 6 moves this onto the live events.)
   useEffect(() => {
@@ -251,10 +267,15 @@ export function App() {
         name={screen.kind === 'chat' ? session?.name : null}
         points={screen.kind === 'chat' ? (standing?.points ?? null) : null}
         onScores={openScores}
+        secret={screen.kind === 'chat' && secret.enabled ? secret : null}
+        onSecret={() => setShowSecret(true)}
       />
       {toast && <Toast message={toast} onDone={clearToast} />}
       {showScores && screen.kind === 'chat' && (
         <LeaderboardSheet board={board} standing={standing} name={session?.name ?? null} onClose={() => setShowScores(false)} />
+      )}
+      {showSecret && screen.kind === 'chat' && secret.enabled && (
+        <SecretSheet secret={secret} onSolved={onSecretSolved} onSecret={setSecret} onSessionGone={sessionGone} onClose={closeSecret} />
       )}
       {screen.kind === 'loading' && <main className="messages" aria-busy="true" />}
       {screen.kind === 'offline' && (

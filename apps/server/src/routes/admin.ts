@@ -8,6 +8,7 @@ import { PeopleError, type Person } from '../people.js';
 import { PersonaError, type EffectivePersona } from '../personas.js';
 import { PointsError, type Reward } from '../points.js';
 import type { PhotoAttempt } from '../photos.js';
+import { SECRET_LEVELS } from '../secrets.js';
 import { SessionError, type Session } from '../sessions.js';
 import type { Services } from '../services.js';
 
@@ -68,9 +69,16 @@ const RewardPatch = z
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), 'Nothing to change');
 
+const SecretsBody = z
+  .object({
+    enabled: z.boolean().optional(),
+    points: z.array(z.number().int().min(0).max(10_000)).length(SECRET_LEVELS, `Give points for all ${SECRET_LEVELS} levels`).optional(),
+  })
+  .refine((b) => b.enabled !== undefined || b.points !== undefined, 'Nothing to change');
+
 export function adminRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { adminAuth, sessions, invites, people, limiter, llm, settings, errors, gates, gateDefs, photos, events, personas, points, pushScores } = services;
+  const { adminAuth, sessions, invites, people, limiter, llm, settings, errors, gates, gateDefs, photos, events, personas, points, pushScores, secrets, pushSecret } = services;
 
   const personName = (slug: string | null) => (slug ? (people.get(slug)?.name ?? `${slug} (deleted)`) : null);
 
@@ -422,6 +430,32 @@ export function adminRouter(config: Config, services: Services): Router {
   });
 
   router.delete('/rewards/:id', (req, res) => handle(res, () => points.deleteReward(req.params.id)));
+
+  // --- Secrets game ---------------------------------------------------------
+
+  const secretsView = () => ({
+    enabled: settings.get('secretsEnabled'),
+    points: settings.get('secretPoints'),
+    levels: SECRET_LEVELS,
+    players: secrets.players(),
+  });
+
+  router.get('/secrets', (_req, res) => {
+    res.json(secretsView());
+  });
+
+  /** Switch the game on or off, or change the points per level. Guests see it at once. */
+  router.put('/secrets', (req, res) => {
+    const body = SecretsBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: body.error.issues[0]?.message ?? 'Invalid request' });
+      return;
+    }
+    if (body.data.enabled !== undefined) settings.set('secretsEnabled', body.data.enabled);
+    if (body.data.points !== undefined) settings.set('secretPoints', body.data.points);
+    pushSecret();
+    res.json(secretsView());
+  });
 
   // --- Gates ----------------------------------------------------------------
 

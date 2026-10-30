@@ -6,11 +6,12 @@ import { Login } from './Login';
 import { PeopleTab } from './PeopleTab';
 import { PhotosTab } from './PhotosTab';
 import { PointsTab } from './PointsTab';
+import { SecretsTab } from './SecretsTab';
 import { SessionsTab } from './SessionsTab';
 import { SystemTab } from './SystemTab';
 import { usePoll } from './usePoll';
 
-type Tab = 'claims' | 'sessions' | 'points' | 'gates' | 'photos' | 'people' | 'system';
+type Tab = 'claims' | 'sessions' | 'points' | 'secrets' | 'gates' | 'photos' | 'people' | 'system';
 
 export function AdminApp() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -51,6 +52,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     { id: 'claims', label: 'Claims', badge: claims?.length },
     { id: 'sessions', label: 'Sessions' },
     { id: 'points', label: 'Points' },
+    { id: 'secrets', label: 'Secrets' },
     { id: 'gates', label: 'Gates' },
     { id: 'photos', label: 'Photos' },
     { id: 'people', label: 'People' },
@@ -70,6 +72,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         {tab === 'claims' && <ClaimsTab claims={claims} reload={reloadClaims} toast={toast} />}
         {tab === 'sessions' && <SessionsTab toast={toast} />}
         {tab === 'points' && <PointsTab toast={toast} />}
+        {tab === 'secrets' && <SecretsTab toast={toast} />}
         {tab === 'gates' && <GatesTab toast={toast} />}
         {tab === 'photos' && <PhotosTab toast={toast} />}
         {tab === 'people' && <PeopleTab toast={toast} />}

@@ -58,6 +58,7 @@ const ConfigSchema = z.object({
   RATE_ADMIN_LOGIN_IP: RateLimit.prefault('5/900'),
   RATE_PHOTO_SESSION: RateLimit.prefault('1/15'),
   RATE_PHOTO_IP: RateLimit.prefault('60/60'),
+  RATE_SECRET_SESSION: RateLimit.prefault('5/120'),
 });
 
 export interface RateLimitRule {
@@ -117,6 +118,8 @@ export interface Config {
     adminLoginPerIp: RateLimitRule;
     photoPerSession: RateLimitRule;
     photoPerIp: RateLimitRule;
+    /** Secrets-game guesses. */
+    secretPerSession: RateLimitRule;
   };
 }
 
@@ -200,6 +203,7 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
       adminLoginPerIp: e.RATE_ADMIN_LOGIN_IP,
       photoPerSession: e.RATE_PHOTO_SESSION,
       photoPerIp: e.RATE_PHOTO_IP,
+      secretPerSession: e.RATE_SECRET_SESSION,
     },
   };
 }

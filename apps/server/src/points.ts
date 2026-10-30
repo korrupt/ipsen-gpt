@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { Db } from './db.js';
 
-export type PointSource = 'gate' | 'admin';
+export type PointSource = 'gate' | 'admin' | 'secret';
 
 export interface LedgerEntry {
   id: number;

@@ -572,3 +572,53 @@ describe('a persona written for one person', () => {
     expect(screen.getByTestId('persona-now').textContent).toBe('Now: Emo SadGPT (picked for this guest)');
   });
 });
+
+describe('secrets game', () => {
+  it('starts the game, saves points per level, and shows each player’s current word', async () => {
+    let state = { enabled: false, points: [3, 5, 8, 12], levels: 4, players: [] as object[] };
+    const fetch = loggedIn({
+      'GET /api/admin/secrets': () => json(state),
+      'PUT /api/admin/secrets': (init) => {
+        state = { ...state, ...JSON.parse(init.body as string) };
+        return json(state);
+      },
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^secrets$/i }));
+    expect((await screen.findByTestId('secrets-switch')).textContent).toContain('The secrets game is off');
+    expect(screen.getByText('Nobody has played yet.')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start the game' }));
+    expect(bodyOf(fetch, 'PUT', '/api/admin/secrets')).toEqual({ enabled: true });
+    expect(await screen.findByText('The secrets game is on')).toBeTruthy();
+
+    const points = screen.getByTestId('secrets-points');
+    const save = within(points).getByRole('button', { name: 'Save points' });
+    expect(save).toHaveProperty('disabled', true);
+    const level4 = within(points).getByLabelText('Level 4');
+    await userEvent.clear(level4);
+    await userEvent.type(level4, '1.5');
+    expect(save).toHaveProperty('disabled', true);
+    await userEvent.clear(level4);
+    await userEvent.type(level4, '20');
+    await userEvent.click(save);
+    expect(bodyOf(fetch, 'PUT', '/api/admin/secrets')).toEqual({ points: [3, 5, 8, 20] });
+    await screen.findByText('Points saved');
+
+    state = {
+      ...state,
+      players: [
+        { sessionId: 's1', name: 'Kari', level: 2, word: 'trombone', solved: [{ level: 1, word: 'pelican', solvedAt: Date.now() }], lastSolvedAt: Date.now() },
+        { sessionId: 's2', name: 'Per', level: 5, word: null, solved: [], lastSolvedAt: null },
+      ],
+    };
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Stop the game' }));
+    expect(bodyOf(fetch, 'PUT', '/api/admin/secrets')).toEqual({ enabled: false });
+    const cards = await screen.findAllByTestId('secret-player');
+    expect(cards[0]!.textContent).toContain('Level 2 of 4');
+    expect(cards[0]!.textContent).toContain('Now after: TROMBONE');
+    expect(cards[0]!.textContent).toContain('Found: PELICAN');
+    expect(cards[1]!.textContent).toContain('All found');
+  });
+});

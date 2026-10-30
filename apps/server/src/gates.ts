@@ -3,7 +3,7 @@ import type { Db } from './db.js';
 import type { GateDef, GateDefSet } from './gateDefs.js';
 
 export type GateStatus = 'active' | 'passed' | 'expired' | 'cancelled';
-export type GateSource = 'session_start' | 'after_messages' | 'admin_forced' | 'timed_global';
+export type GateSource = 'session_start' | 'after_messages' | 'secret_level' | 'admin_forced' | 'timed_global';
 
 export interface Gate {
   id: string;
@@ -177,6 +177,21 @@ export class GateStore {
       if (def.personSlug !== null && def.personSlug !== subject.personSlug) continue;
       this.give(subject.id, { def }, 'after_messages');
     }
+    return this.current(subject.id);
+  }
+
+  /**
+   * The guest just reached a secrets-game level: its secret_level gates (global,
+   * or for their person). Returns the gate that now blocks chat, if any.
+   */
+  secretLevelReached(subject: GateSubject, level: number): Gate | undefined {
+    this.db.transaction(() => {
+      for (const def of this.defs().defs) {
+        if (def.trigger.type !== 'secret_level' || def.trigger.level !== level) continue;
+        if (def.personSlug !== null && def.personSlug !== subject.personSlug) continue;
+        this.give(subject.id, { def }, 'secret_level');
+      }
+    })();
     return this.current(subject.id);
   }
 

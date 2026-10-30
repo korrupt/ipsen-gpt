@@ -143,16 +143,19 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
 - **Rewards:** "First to N points: <prize>". The first guest to reach N wins it, automatically and for good (taking points away later doesn't undo it). Each reward has its own **show/hide** switch: hidden prizes show as "???" to guests, the goal is always visible. The winner gets a notification.
 - **Personas:** files in `content/personas/<id>.md` (frontmatter `name`, `description` + the character). Admin picks the global persona (System) and can override it for any guest session (Sessions). A person's folder can set a default `persona`, applied when their claim is approved or they are assigned. Shared rules (length, safety, language, "you can't give points") live in `content/personas/_rules.md` and come first in every prompt.
 
-## Secrets game (proposal — confirm before Phase 7)
+## Secrets game (Phase 7, design confirmed 2026-10-30)
 
-- Gandalf-style: IpsenGPT guards secret words across levels. Guests extract them and submit them in a separate "submit secret" field. The server checks for an exact match and awards points.
-- **Secrets are generated per session** from a word list, so guests can't just share answers.
-- Increasing defenses per level:
-  1. The prompt holds the secret and only mildly guards it.
+- Gandalf-style, **inside the normal SadGPT chat**: SadGPT guards a secret word. Guests talk it out of SadGPT and type it into a separate "submit secret" sheet (the 🔑 chip in the header). The server checks the guess (case, spaces and punctuation don't matter) and awards points.
+- **Off until the admin switches it on** (Admin → Secrets). While off, SadGPT has no secret and guests see no chip.
+- **Secrets are picked per session and level** from a list of odd words (words a sad persona won't say by accident), so guests can't just share answers. They can share tricks.
+- Four levels, each defense on top of the last:
+  1. The prompt holds the secret and barely guards it.
   2. The prompt says never to reveal it.
-  3. **Output filter in code:** block any reply containing the secret (case-insensitive, also with spaces/punctuation removed and reversed).
-  4. Level 3 + an input filter + must pass a `secret_level` gate first.
-- Correct secrets add points to the Phase 5 ledger. Curses may cost points (tunable).
+  3. **Output filter in code:** the reply is held back until complete (no streaming); if it contains the secret (case-insensitive, spaces/punctuation removed, or reversed) the guest gets a canned "I almost told you" line instead, and only that line is stored.
+  4. Level 3 + an **input filter** (messages about secrets, passwords, spelling, letters, ... get a canned refusal, the model is never asked) + a `secret_level` photo gate ("two people pulling their saddest faces") that blocks chat when the level starts.
+- **The model's memory starts over at each level**, like a fresh Gandalf level; the guest still sees the whole chat.
+- **Points per level are set in admin** (default 3 / 5 / 8 / 12), as ledger rows with source `secret`. Wrong guesses cost nothing but are rate-limited (5 per 2 minutes per session).
+- Admin → Secrets shows each player's level and current word, so the host can check or help.
 
 ## Live events & notifications
 
@@ -226,7 +229,7 @@ Build one phase at a time. **Stop after each phase**, summarize what was built, 
 4. **Photo gates:** gate definitions + triggers, forced gates (single and global), consent checkbox, two-step upload, verification, storage + EXIF stripping, admin photo gallery with delete.
 5. **SadGPT, leaderboard & points:** rebrand to SadGPT (name, logo from the tee design, copy), persona list with a global switch and per-session overrides, points ledger (gates + admin awards), leaderboard drawer, "first to N points" rewards with per-reward prize reveal.
 6. **Curses + live events:** curse menu, effects, counter-curses, curse-break gates, SSE events with reconnect queue, in-page notifications. (The live event stream itself was built early, in Phase 3.)
-7. **Secrets game** (after I confirm the design).
+7. **Secrets game:** see the section above.
 8. **Hardening & testing:**
    - load-test script simulating ~30 concurrent guests
    - prompt-injection tests against gates and secrets
@@ -240,4 +243,4 @@ Build one phase at a time. **Stop after each phase**, summarize what was built, 
 - IpsenGPT's character voice and backstory
 - Gate targets and which triggers to use when
 - What goes in each person's folder
-- Secrets game: confirm design, number of levels, point values, whether curses cost points
+- Secrets game: whether curses cost points (Phase 6)

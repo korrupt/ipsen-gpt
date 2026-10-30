@@ -10,7 +10,7 @@ const Trigger = z.discriminatedUnion('type', [
   z.object({ type: z.literal('after_messages'), count: z.number().int().positive() }),
   /** Offered to break a curse (Phase 6). */
   z.object({ type: z.literal('curse_break') }),
-  /** Required before a secrets-game level unlocks (Phase 7). */
+  /** When a guest reaches this secrets-game level (2 and up); blocks chat until passed. */
   z.object({ type: z.literal('secret_level'), level: z.number().int().positive() }),
   /** Only when the admin forces it. */
   z.object({ type: z.literal('admin_forced') }),

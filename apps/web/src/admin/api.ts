@@ -81,7 +81,26 @@ export interface AdminReward {
 export interface PointsOverview {
   leaderboard: { rank: number; sessionId: string; name: string; points: number }[];
   rewards: AdminReward[];
-  recent: { id: number; sessionId: string; sessionName: string | null; amount: number; reason: string; source: 'gate' | 'admin'; createdAt: number }[];
+  recent: { id: number; sessionId: string; sessionName: string | null; amount: number; reason: string; source: 'gate' | 'admin' | 'secret'; createdAt: number }[];
+}
+
+export interface SecretPlayer {
+  sessionId: string;
+  name: string | null;
+  /** 1..levels, or levels + 1 when every secret is found. */
+  level: number;
+  /** The word they're after now (null when done, or before their first message at this level). */
+  word: string | null;
+  solved: { level: number; word: string; solvedAt: number }[];
+  lastSolvedAt: number | null;
+}
+
+export interface SecretsOverview {
+  enabled: boolean;
+  /** Points per level, level 1 first. */
+  points: number[];
+  levels: number;
+  players: SecretPlayer[];
 }
 
 export interface AdminMessage {
@@ -277,6 +296,9 @@ export const adminApi = {
   updateReward: (id: string, patch: Partial<Pick<AdminReward, 'threshold' | 'prize' | 'revealed'>>) =>
     call<{ reward: AdminReward }>('PATCH', `/rewards/${id}`, patch).then((r) => r.reward),
   deleteReward: (id: string) => call<{ ok: true }>('DELETE', `/rewards/${id}`),
+
+  secrets: () => call<SecretsOverview>('GET', '/secrets'),
+  updateSecrets: (patch: { enabled?: boolean; points?: number[] }) => call<SecretsOverview>('PUT', '/secrets', patch),
 
   system: () => call<SystemStatus>('GET', '/system'),
   pause: (reason: string) => call<{ pauseReason: string; status: ChatStatus }>('PUT', '/system/pause', { reason }),

@@ -67,7 +67,7 @@ export async function checkResponse(res: Response): Promise<void> {
   throw new ApiError(body?.error ?? NETWORK_ERROR, res.status, body?.code);
 }
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+export async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, {

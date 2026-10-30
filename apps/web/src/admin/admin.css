@@ -489,3 +489,21 @@ a.btn {
   font-family: ui-monospace, monospace;
   font-size: 12px;
 }
+
+/* Secrets tab */
+.secrets-points {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.secrets-points__level {
+  display: flex;
+  flex-direction: column;
+}
+
+.secrets-word {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}

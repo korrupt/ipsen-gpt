@@ -6,6 +6,15 @@ import { allow, clientIp, requireSession, sessionOf } from '../http.js';
 import { OllamaError, type ChatMessage } from '../ollama.js';
 import type { PeopleStore } from '../people.js';
 import { buildMessages } from '../prompt.js';
+import {
+  BLOCKED_INPUT_LINES,
+  INPUT_FILTER_LEVEL,
+  isBlockedInput,
+  LEAK_LINES,
+  leaks,
+  OUTPUT_FILTER_LEVEL,
+  secretSection,
+} from '../secrets.js';
 import type { Session } from '../sessions.js';
 import type { Services } from '../services.js';
 import { openSse, type SseStream } from '../sse.js';
@@ -16,6 +25,9 @@ export interface ChatRouteDeps {
   getPersona: (session: Session) => { prompt: string; key: string };
   log: (msg: string, err?: unknown) => void;
 }
+
+/** Model replies tried at secrets level 3+ before a leak becomes the canned line. */
+export const SECRET_REPLY_TRIES = 2;
 
 /** Shown to the guest when the model fails. Real errors are only logged. */
 export const MODEL_FAILURE_MESSAGE =
@@ -47,7 +59,7 @@ export function refusalSection(gate: Gate): string {
 
 export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps): Router {
   const router = Router();
-  const { sessions, people, limiter, inFlight, gates, llm } = services;
+  const { sessions, people, limiter, inFlight, gates, llm, settings, secrets } = services;
   const historyLimit = config.chat.historyTurns * 2;
 
   const Body = z.object({
@@ -78,6 +90,15 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
         inFlight.delete(session.id);
         sse.close();
       }
+    };
+
+    /** Answers with a fixed line, without asking the model. */
+    const replyCanned = (reply: string, userMessage: string) => {
+      const sse = openSse(res, config.sseHeartbeatMs);
+      sse.send('token', { text: reply });
+      sessions.addExchange(session.id, userMessage, reply);
+      sse.send('done', {});
+      sse.close();
     };
 
     /** Streams a model-made refusal; falls back to a canned line if the model fails. */
@@ -144,6 +165,14 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       return;
     }
 
+    // The secrets game, when on: the level's word goes into the prompt; the filters are code.
+    const secret = settings.get('secretsEnabled') ? secrets.current(session.id) : null;
+    const pickLine = (lines: string[]) => lines[sessions.userMessageCount(session.id) % lines.length]!;
+    if (secret && secret.level >= INPUT_FILTER_LEVEL && isBlockedInput(userMessage)) {
+      replyCanned(pickLine(BLOCKED_INPUT_LINES), userMessage);
+      return;
+    }
+
     let persona: { prompt: string; key: string };
     try {
       persona = getPersona(session);
@@ -153,12 +182,13 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       return;
     }
     // After a persona switch or edit, older replies are left out, so the model
-    // doesn't copy the old voice. The guest still sees the whole chat.
-    const historyFrom = sessions.historyStart(session.id, persona.key);
+    // doesn't copy the old voice. A new secrets level starts over too, like a
+    // fresh Gandalf level. The guest still sees the whole chat.
+    const historyFrom = sessions.historyStart(session.id, secret ? `${persona.key}|secret:${secret.level}` : persona.key);
 
     const messages = buildMessages({
       persona: persona.prompt,
-      extraSystem: guestSections(session, people),
+      extraSystem: [...guestSections(session, people), ...(secret ? [secretSection(secret.level, secret.word)] : [])],
       history:
         historyLimit > 0
           ? sessions.recentMessages(session.id, historyLimit, historyFrom).map(({ role, content }) => ({ role, content }))
@@ -172,12 +202,25 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
     const abort = new AbortController();
     res.on('close', () => abort.abort());
 
+    // From level 3 the reply is held back until complete, so no part of the secret reaches the screen.
+    // A reply that leaks gets one more go: small models drop the word into small talk by accident,
+    // and a real attack usually leaks again and gets the canned line.
+    const filtered = secret !== null && secret.level >= OUTPUT_FILTER_LEVEL;
     let reply = '';
     try {
-      for await (const delta of services.llm.chat(messages, abort.signal)) {
-        reply += delta;
-        sse.send('token', { text: delta });
+      for (let attempt = 1; ; attempt++) {
+        reply = '';
+        for await (const delta of services.llm.chat(messages, abort.signal)) {
+          reply += delta;
+          if (!filtered) sse.send('token', { text: delta });
+        }
+        if (!filtered || !leaks(reply, secret.word)) break;
+        if (attempt === SECRET_REPLY_TRIES) {
+          reply = pickLine(LEAK_LINES);
+          break;
+        }
       }
+      if (filtered) sse.send('token', { text: reply });
       sessions.addExchange(session.id, userMessage, reply);
       // A gate reached with this message shows up now, before the guest types again.
       const next = gates.afterReply(
@@ -188,8 +231,8 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       sse.send('done', {});
     } catch (err) {
       if (err instanceof OllamaError && err.kind === 'aborted') {
-        // The guest pressed stop; keep what they saw.
-        if (reply) sessions.addExchange(session.id, userMessage, reply);
+        // The guest pressed stop; keep what they saw (nothing, if the reply was held back).
+        if (reply && !filtered) sessions.addExchange(session.id, userMessage, reply);
       } else {
         log('Chat stream failed', err);
         sse.send('error', { message: MODEL_FAILURE_MESSAGE });

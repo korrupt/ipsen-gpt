@@ -207,3 +207,86 @@ describe('points and the leaderboard', () => {
     expect(screen.queryByTestId('toast')).toBeNull();
   });
 });
+
+describe('the secrets game', () => {
+  const LEVEL1 = { enabled: true, level: 1, levels: 4, done: false, points: 3 };
+  const LEVEL4 = { enabled: true, level: 4, levels: 4, done: false, points: 12 };
+
+  async function openSheet(live: ReturnType<typeof pushableEvents>, secret: object = LEVEL1) {
+    await waitFor(() => expect(live.connections()).toBe(1));
+    expect(screen.queryByTestId('secret-chip')).toBeNull();
+    await live.push('secret', secret);
+    await userEvent.click(screen.getByTestId('secret-chip'));
+    return screen.getByRole('dialog', { name: "SadGPT's secret" });
+  }
+
+  it('the chip shows up when the host starts the game and opens the guess sheet', async () => {
+    const { live } = returningGuest();
+    render(<App />);
+    const dialog = await openSheet(live);
+    const chip = screen.getByTestId('secret-chip');
+    expect(chip.textContent).toBe('🔑1/4');
+    expect(chip.getAttribute('aria-label')).toBe('Secret level 1 of 4. Guess the secret');
+    expect(screen.getByTestId('secret-level').textContent).toBe('Level 1 of 4 · 3 points');
+    expect(dialog.textContent).toContain('terrible at keeping secrets');
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'The secret word' }));
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a wrong guess keeps the sheet open with SadGPT’s answer', async () => {
+    const { live, fetch } = returningGuest({
+      'POST /api/secret': () => json({ correct: false, message: "That's not it.", points: 0, secret: LEVEL1 }),
+    });
+    render(<App />);
+    await openSheet(live);
+    await userEvent.type(screen.getByRole('textbox', { name: 'The secret word' }), 'walrus{Enter}');
+    expect((await screen.findByTestId('secret-message')).textContent).toBe("That's not it.");
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    const call = fetch.mock.calls.find(([url]) => url === '/api/secret')!;
+    expect(JSON.parse(call[1].body as string)).toEqual({ guess: 'walrus' });
+  });
+
+  it('a right guess closes the sheet, SadGPT admits it in chat, and the next level begins (with its photo gate)', async () => {
+    const SAD_PAIR = { id: 'g4', prompt: 'Two sad faces, please.', deadlineAt: null };
+    const { live } = returningGuest({
+      'POST /api/secret': () =>
+        json({ correct: true, message: 'Fine. That was my secret.', points: 8, secret: LEVEL4, gate: SAD_PAIR }),
+    });
+    render(<App />);
+    await openSheet(live, { ...LEVEL1, level: 3, points: 8 });
+    await userEvent.type(screen.getByRole('textbox', { name: 'The secret word' }), 'Trombone{Enter}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByText('Fine. That was my secret.')).toBeTruthy();
+    expect(screen.getByTestId('toast').textContent).toBe('+8 points: you found the secret');
+    expect(screen.getByTestId('secret-chip').textContent).toBe('🔑4/4');
+    expect(screen.getByText('Two sad faces, please.')).toBeTruthy();
+  });
+
+  it('says so when guessing too fast', async () => {
+    const { live } = returningGuest({
+      'POST /api/secret': () => json({ error: 'Slow down. SadGPT needs a moment to process its feelings.' }, 429),
+    });
+    render(<App />);
+    await openSheet(live);
+    await userEvent.type(screen.getByRole('textbox', { name: 'The secret word' }), 'x{Enter}');
+    expect((await screen.findByTestId('secret-message')).textContent).toMatch(/Slow down/);
+  });
+
+  it('the chip and sheet go away when the host stops the game, and show when all secrets are found', async () => {
+    const { live } = returningGuest();
+    render(<App />);
+    await openSheet(live);
+    await live.push('secret', { enabled: false });
+    expect(screen.queryByTestId('secret-chip')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    await live.push('secret', { enabled: true, level: 4, levels: 4, done: true, points: null });
+    const chip = screen.getByTestId('secret-chip');
+    expect(chip.textContent).toBe('🔑✓');
+    await userEvent.click(chip);
+    expect(screen.getByTestId('secret-done')).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'The secret word' })).toBeNull();
+  });
+});

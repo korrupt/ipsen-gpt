@@ -4,9 +4,12 @@ interface Props {
   /** The guest's points; the button opens the leaderboard. Hidden until known. */
   points?: number | null;
   onScores?: () => void;
+  /** The secrets game, while it's on; the chip opens the guess sheet. */
+  secret?: { level: number; levels: number; done: boolean } | null;
+  onSecret?: () => void;
 }
 
-export function Header({ thinking, name, points, onScores }: Props) {
+export function Header({ thinking, name, points, onScores, secret, onSecret }: Props) {
   return (
     <header className="header">
       <div
@@ -20,6 +23,18 @@ export function Header({ thinking, name, points, onScores }: Props) {
         <span className="header__user" title={`Chatting as ${name}`} data-testid="header-user">
           {name}
         </span>
+      )}
+      {secret && onSecret && (
+        <button
+          type="button"
+          className="secret-chip"
+          onClick={onSecret}
+          aria-label={secret.done ? 'Every secret found' : `Secret level ${secret.level} of ${secret.levels}. Guess the secret`}
+          data-testid="secret-chip"
+        >
+          <span aria-hidden="true">🔑</span>
+          {secret.done ? '✓' : `${secret.level}/${secret.levels}`}
+        </button>
       )}
       {points !== undefined && points !== null && onScores && (
         <button

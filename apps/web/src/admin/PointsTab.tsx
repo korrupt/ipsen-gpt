@@ -248,7 +248,7 @@ export function PointsTab({ toast }: { toast: Toast }) {
               <span className="admin-muted">{ago(r.createdAt)}</span>
             </div>
             <div className="admin-muted">
-              {r.source === 'gate' ? 'Photo gate' : 'You'}: {r.reason}
+              {r.source === 'gate' ? 'Photo gate' : r.source === 'secret' ? 'Secrets game' : 'You'}: {r.reason}
             </div>
           </li>
         ))}

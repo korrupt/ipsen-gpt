@@ -9,6 +9,8 @@ import type { AddressInfo } from 'node:net';
  */
 export type MockMode =
   | { kind: 'reply'; text?: string }
+  /** Each chat request gets the next text in turn (the last one repeats). */
+  | { kind: 'replies'; texts: string[] }
   /** Alive (health checks answer) but /api/chat never responds: a busy or stuck model. */
   | { kind: 'hang' }
   /** Alive, and replies after `ms`: a busy model that eventually answers. */
@@ -73,6 +75,7 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
   const tokenDelayMs = opts.tokenDelayMs ?? 40;
   const requests: unknown[] = [];
   let replyIndex = 0;
+  let sequenceIndex = 0;
   let abortedStreams = 0;
   const sockets = new Set<import('node:net').Socket>();
 
@@ -115,9 +118,11 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
     };
     const text = body.format
       ? verdictText()
-      : (current.kind === 'reply' || current.kind === 'delay') && current.text !== undefined
-        ? current.text
-        : CANNED_REPLIES[replyIndex++ % CANNED_REPLIES.length]!;
+      : current.kind === 'replies'
+        ? current.texts[Math.min(sequenceIndex++, current.texts.length - 1)]!
+        : (current.kind === 'reply' || current.kind === 'delay') && current.text !== undefined
+          ? current.text
+          : CANNED_REPLIES[replyIndex++ % CANNED_REPLIES.length]!;
     let tokens = tokenize(text);
     if (current.kind === 'stream_error' || current.kind === 'truncate') tokens = tokens.slice(0, 3);
 
@@ -166,6 +171,7 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
     },
     setMode(m) {
       mode = m;
+      sequenceIndex = 0;
     },
     setVerdict(v) {
       verdict = v;

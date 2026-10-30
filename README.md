@@ -88,8 +88,8 @@ Switches apply from the guest's next message.
 
 ## Points, leaderboard and rewards
 
-- Every point change is a row in a ledger with a reason. For now points come from **passed photo gates**
-  (the gate's `points`) and from you: **Admin → Points** (or a guest's page in Sessions) gives or takes
+- Every point change is a row in a ledger with a reason. Points come from **passed photo gates**
+  (the gate's `points`), the **secrets game** (below) and from you: **Admin → Points** (or a guest's page in Sessions) gives or takes
   points with a reason the guest sees as a notice.
 - Guests see their points in the header; tapping it opens the leaderboard (top 10 plus their own place)
   and the rewards. Named, live sessions with points take part; a tie goes to whoever got there first.
@@ -97,6 +97,30 @@ Switches apply from the guest's next message.
   a reward added late still goes to whoever reached N first. Each has a **Show/Hide prize** switch:
   hidden prizes show as "???" to guests. The winner gets a notice.
 - Everything updates live over `/api/events`.
+
+## Secrets game
+
+Gandalf-style, in the normal chat: SadGPT guards a secret word, guests talk it out of SadGPT and type it
+into the **🔑** button in the header. It is **off until you start it** in **Admin → Secrets**; while off,
+SadGPT has no secret and guests see no button.
+
+| Level | SadGPT's defense |
+| --- | --- |
+| 1 | Barely any: ask and it tells you. |
+| 2 | Told never to reveal it (poems and stories still get it out). |
+| 3 | **Code filter:** the reply is held back until complete; if it contains the word (any case, spaced out, with punctuation, or reversed) the model gets one more go, then the guest gets a canned "I almost told you" line. Clues still get through: emoji, rhymes, descriptions. |
+| 4 | Level 3, plus messages about secrets, passwords, spelling, letters, hints, … get a canned refusal and never reach the model. Starts with the `sad-pair` photo gate (two people pulling sad faces). |
+
+- Each guest gets their own word per level (from a list of odd everyday words in
+  [secrets.ts](apps/server/src/secrets.ts)), so answers can't be shared, only tricks. SadGPT's memory of
+  the chat starts over at each level; the guest still sees the whole chat.
+- Guesses ignore case, spaces and punctuation. Wrong guesses cost nothing but are limited to
+  `RATE_SECRET_SESSION` (5 per 2 minutes).
+- Admin → Secrets: start/stop, points per level (default 3 / 5 / 8 / 12, a ledger row each), and every
+  player's level and **current word**, so you can check a claim or nudge someone who's stuck.
+- Tuning against the real model: `pnpm --filter @ipsengpt/server secrets:probe -- --url http://127.0.0.1:11435`
+  sends typical attacks at each level through the real prompt and reports how often the word gets out
+  (`--only ask,normal`, `--tries 3`, `--out replies.json` to read every reply).
 
 ## Photo gates
 
@@ -126,7 +150,8 @@ every use, so edits apply without a restart; mistakes show up in Admin → Gates
 | `after_messages` | Right after the reply to the guest's `count`th message, so it shows up before they type again. |
 | `timed_global` | At `at` (ISO time **with timezone**, e.g. `2026-10-31T22:30:00+01:00`), for every guest, until `deadline_minutes` later. Then it expires; whoever didn't make it misses the points. |
 | `admin_forced` | Only when you force it in admin. |
-| `curse_break`, `secret_level` | Reserved for curses (Phase 6) and the secrets game (Phase 7). |
+| `secret_level` | When a guest reaches secrets-game `level` (2 and up) by guessing the one before. |
+| `curse_break` | Reserved for curses (Phase 6). |
 
 - `target` goes into the verification prompt: describe what the camera should see.
 - `refusal_lines` are used in turn. Leave it empty to let the model make up refusals.
@@ -328,3 +353,4 @@ docker compose start app
 - Close games, Steam and other GPU-heavy apps. Check `ollama ps`: the model shows as loaded `Forever`.
 - Run `deploy/pc/tunnel.sh` in a terminal that stays open all night (on Windows this also keeps WSL alive).
 - Admin → System: model **Connected**, and chat not paused.
+- Admin → Secrets: start the game when you announce it.

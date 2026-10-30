@@ -11,11 +11,12 @@ import { openSse } from '../sse.js';
  *  - `gate` {gate}: the photo gate blocking chat, or null
  *  - `points` {points, rank}: the guest's own score and place
  *  - `scoreboard` {top, rewards}: the top of the leaderboard and the rewards (prizes hidden until revealed)
+ *  - `secret` {enabled, level, levels, done, points}: the guest's secrets game (never the word)
  *  - `reward_won` {reward}: only when it happens, not on connect
  * The others are full snapshots, so a phone that reconnects is up to date at once.
  * (Phase 6 adds curses and claim updates here.)
  */
-export function eventsRouter(config: Config, { sessions, gates, llm, events, points, scoreboard }: Services): Router {
+export function eventsRouter(config: Config, { sessions, gates, llm, events, points, scoreboard, secretView }: Services): Router {
   const router = Router();
 
   router.get('/events', requireSession(sessions), (_req, res) => {
@@ -26,6 +27,7 @@ export function eventsRouter(config: Config, { sessions, gates, llm, events, poi
     sse.send('gate', { gate: gate ? gateView(gate) : null });
     sse.send('points', points.standing(session.id));
     sse.send('scoreboard', scoreboard());
+    sse.send('secret', secretView(session.id));
     const unsubscribe = events.subscribe(session.id, (event, data) => sse.send(event, data));
     res.on('close', unsubscribe);
   });

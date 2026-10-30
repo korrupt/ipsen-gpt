@@ -6,11 +6,19 @@ export interface SettingValues {
   pauseReason: string | null;
   /** The global persona the admin picked; null: the configured default. */
   personaId: string | null;
+  /** Whether the secrets game is on: SadGPT holds a secret and guests see the 🔑 chip. */
+  secretsEnabled: boolean;
+  /** Points for solving each secrets-game level, level 1 first. */
+  secretPoints: number[];
 }
+
+export const DEFAULT_SECRET_POINTS = [3, 5, 8, 12];
 
 const DEFAULTS: SettingValues = {
   pauseReason: null,
   personaId: null,
+  secretsEnabled: false,
+  secretPoints: DEFAULT_SECRET_POINTS,
 };
 
 export class Settings {
@@ -28,6 +36,11 @@ export class Settings {
   }
 
   all(): SettingValues {
-    return { pauseReason: this.get('pauseReason'), personaId: this.get('personaId') };
+    return {
+      pauseReason: this.get('pauseReason'),
+      personaId: this.get('personaId'),
+      secretsEnabled: this.get('secretsEnabled'),
+      secretPoints: this.get('secretPoints'),
+    };
   }
 }

@@ -12,6 +12,7 @@ import { PersonaStore } from './personas.js';
 import { PointsStore, rewardView } from './points.js';
 import { PhotoStore } from './photos.js';
 import { RateLimiter } from './rateLimit.js';
+import { SECRET_LEVELS, SecretStore, type SecretView } from './secrets.js';
 import { SessionStore } from './sessions.js';
 import { Settings } from './settings.js';
 
@@ -20,6 +21,8 @@ export interface Services {
   people: PeopleStore;
   personas: PersonaStore;
   points: PointsStore;
+  /** The secrets game's words and levels. Whether it's on, and its points, are in settings. */
+  secrets: SecretStore;
   sessions: SessionStore;
   /** Single-use invite links that make the guest a person without a claim code. */
   invites: InviteStore;
@@ -46,6 +49,10 @@ export interface Services {
   scoreboard: () => { top: { rank: number; name: string; points: number }[]; rewards: ReturnType<typeof rewardView>[] };
   /** Sends every open page the new scoreboard and its own score (after points or names change). */
   pushScores: () => void;
+  /** What a guest sees of their secrets game. */
+  secretView: (sessionId: string) => SecretView;
+  /** Sends the guest's secrets-game state to their open pages; no id: to every open page. */
+  pushSecret: (sessionId?: string) => void;
 }
 
 /** How many places guests see on the leaderboard (their own place is always shown too). */
@@ -81,6 +88,18 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
   const llm = new Llm(config.ollama, settings, log, now);
   const events = new EventHub();
   const points = new PointsStore(db, now);
+  const secrets = new SecretStore(db, now);
+  const secretView = (sessionId: string): SecretView => {
+    if (!settings.get('secretsEnabled')) return { enabled: false };
+    const level = secrets.level(sessionId);
+    const done = level > SECRET_LEVELS;
+    return { enabled: true, level: Math.min(level, SECRET_LEVELS), levels: SECRET_LEVELS, done, points: done ? null : (settings.get('secretPoints')[level - 1] ?? 0) };
+  };
+  const pushSecret = (sessionId?: string) => {
+    for (const id of sessionId ? [sessionId] : events.sessionIds()) {
+      if (events.isListening(id)) events.toSession(id, 'secret', secretView(id));
+    }
+  };
   const scoreboard = () => ({
     top: points.leaderboard(LEADERBOARD_SIZE).map(({ rank, name, points: p }) => ({ rank, name, points: p })),
     rewards: points.rewards().map(rewardView),
@@ -109,6 +128,7 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     people,
     personas,
     points,
+    secrets,
     sessions,
     invites: new InviteStore(db, now),
     gates,
@@ -125,6 +145,8 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     verifying: new Set(),
     scoreboard,
     pushScores,
+    secretView,
+    pushSecret,
     tick: () =>
       gates.tick(
         () => sessions.liveNamedIds(),

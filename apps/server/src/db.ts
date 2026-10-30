@@ -159,6 +159,33 @@ const MIGRATIONS: string[] = [
   -- apart from picks made in Admin → Sessions, so claimed sessions start with none.
   UPDATE sessions SET persona_id = NULL WHERE state = 'claimed';
   `,
+  `
+  -- The secrets game (Phase 7): one word per session and level, picked when first needed.
+  CREATE TABLE secrets (
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    level      INTEGER NOT NULL CHECK (level > 0),
+    word       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    solved_at  INTEGER,
+    PRIMARY KEY (session_id, level)
+  );
+
+  -- Points get a third source, 'secret'. SQLite can't change a CHECK, so the table is rebuilt.
+  CREATE TABLE points_new (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    amount     INTEGER NOT NULL,
+    reason     TEXT NOT NULL,
+    source     TEXT NOT NULL CHECK (source IN ('gate', 'admin', 'secret')),
+    gate_id    TEXT UNIQUE REFERENCES gates (id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL
+  );
+  INSERT INTO points_new (id, session_id, amount, reason, source, gate_id, created_at)
+    SELECT id, session_id, amount, reason, source, gate_id, created_at FROM points;
+  DROP TABLE points;
+  ALTER TABLE points_new RENAME TO points;
+  CREATE INDEX points_session ON points (session_id, created_at);
+  `,
 ];
 
 export function openDb(dbPath: string): Db {

@@ -4,19 +4,39 @@
     {
       "name": "mock-ollama",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@ipsengpt/server", "mock:ollama"],
+      "runtimeArgs": [
+        "--filter",
+        "@ipsengpt/server",
+        "mock:ollama"
+      ],
       "port": 11436
     },
     {
       "name": "server-mock",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "OLLAMA_URL=http://127.0.0.1:11436 OLLAMA_MODEL=mock pnpm --filter @ipsengpt/server dev"],
+      "runtimeArgs": [
+        "-c",
+        "OLLAMA_URL=http://127.0.0.1:11436 OLLAMA_MODEL=mock pnpm --filter @ipsengpt/server dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "server-tunnel",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "OLLAMA_URL=http://127.0.0.1:11435 OLLAMA_MODEL=qwen3-vl:8b-instruct DB_PATH=data/tunnel-test.sqlite ADMIN_PASSWORD=local-test-only ADMIN_COOKIE_SECURE=false pnpm --filter @ipsengpt/server dev"
+      ],
       "port": 3000
     },
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@ipsengpt/web", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@ipsengpt/web",
+        "dev"
+      ],
       "port": 5173
     }
   ]

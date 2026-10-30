@@ -35,5 +35,20 @@
     "trigger": {
       "type": "admin_forced"
     }
+  },
+  {
+    "id": "sad-pair",
+    "target": "two people in the same photo, both pulling sad faces",
+    "guest_prompt": "Level 4. Before I even think about my last secret, show me two people pulling their saddest faces. Together. Misery loves company.",
+    "refusal_lines": [
+      "Two sad faces first. One isn't enough. One is just me.",
+      "I said two people. Sad ones. In one photo. I'll wait. I'm good at waiting.",
+      "No sad pair, no secret. Find someone to be miserable with."
+    ],
+    "points": 5,
+    "trigger": {
+      "type": "secret_level",
+      "level": 4
+    }
   }
 ]

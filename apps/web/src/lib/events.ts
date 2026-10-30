@@ -1,4 +1,5 @@
 import type { GateView } from './photos';
+import type { SecretView } from './secret';
 import { authHeaders, checkResponse, SessionGoneError } from './session';
 import { SseParser } from './sse';
 
@@ -41,6 +42,8 @@ export interface LiveHandlers {
   onRewardWon?: (reward: GuestReward) => void;
   /** The host gave (or took) this guest points. */
   onPointsAwarded?: (award: { amount: number; reason: string }) => void;
+  /** The guest's secrets game: on/off, level. */
+  onSecret?: (secret: SecretView) => void;
 }
 
 /** Waits between reconnects: 1 s, 2 s, 4 s ... up to 15 s; back to 1 s after a good connection. */
@@ -76,6 +79,7 @@ export function connectEvents(handlers: LiveHandlers): () => void {
           else if (event === 'scoreboard') handlers.onScoreboard?.(value as Scoreboard);
           else if (event === 'reward_won') handlers.onRewardWon?.(value as GuestReward);
           else if (event === 'points_awarded') handlers.onPointsAwarded?.(value as { amount: number; reason: string });
+          else if (event === 'secret') handlers.onSecret?.(value as SecretView);
         });
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
         for (;;) {
