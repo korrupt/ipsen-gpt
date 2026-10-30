@@ -13,7 +13,7 @@ import { openSse, type SseStream } from '../sse.js';
 export interface ChatRouteDeps {
   config: Config;
   services: Services;
-  getPersona: (session: Session) => string;
+  getPersona: (session: Session) => { prompt: string; key: string };
   log: (msg: string, err?: unknown) => void;
 }
 
@@ -85,7 +85,7 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       const canned = DEFAULT_REFUSALS[n % DEFAULT_REFUSALS.length]!;
       let persona: string;
       try {
-        persona = getPersona(session);
+        persona = getPersona(session).prompt;
       } catch (err) {
         log('Failed to load persona', err);
         sse.send('token', { text: canned });
@@ -144,7 +144,7 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       return;
     }
 
-    let persona: string;
+    let persona: { prompt: string; key: string };
     try {
       persona = getPersona(session);
     } catch (err) {
@@ -152,13 +152,16 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       res.status(500).json({ error: MODEL_FAILURE_MESSAGE });
       return;
     }
+    // After a persona switch or edit, older replies are left out, so the model
+    // doesn't copy the old voice. The guest still sees the whole chat.
+    const historyFrom = sessions.historyStart(session.id, persona.key);
 
     const messages = buildMessages({
-      persona,
+      persona: persona.prompt,
       extraSystem: guestSections(session, people),
       history:
         historyLimit > 0
-          ? sessions.recentMessages(session.id, historyLimit).map(({ role, content }) => ({ role, content }))
+          ? sessions.recentMessages(session.id, historyLimit, historyFrom).map(({ role, content }) => ({ role, content }))
           : [],
       historyTurns: config.chat.historyTurns,
       userMessage,

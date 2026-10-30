@@ -67,17 +67,22 @@ can be reset to their original text or added back.
 On disk each persona is `<id>.md` (frontmatter `name`, `description`, then the character) in `PERSONAS_DIR`
 (`data/personas`, a volume in production), next to `_rules.md`. It's party data: on first start the app
 copies in the shipped ones from `content/personas/` (`PERSONAS_SEED_DIR`), and deploys never overwrite it.
-The persona a guest gets:
+The persona a guest gets, looked up on every message (Admin → Sessions shows it and why):
 
-1. their own, set in **Admin → Sessions** (any guest), else
-2. the global one, picked in **Admin → System**, else
-3. `DEFAULT_PERSONA` (`sadgpt`).
+1. one picked for them in **Admin → Sessions** (any guest), else
+2. if they're a claimed person, the persona set on that person in **Admin → People**, else
+3. the global one, picked in **Admin → System**, else
+4. `DEFAULT_PERSONA` (`sadgpt`).
 
-A person can get a persona in **Admin → People**, applied when their claim is approved or they are assigned:
+A person's persona in **Admin → People** applies as soon as they are approved, and changes to it reach
+them at once, also while they're chatting:
 - one from the list (`persona: <id>` in their `person.md`), or
 - **Custom**: text written just for them (how SadGPT acts toward them), saved as `persona.md` in their
-  folder. It comes after the shared rules and is used whenever their session has no persona picked in
-  Sessions. It's separate from their "Info" (what SadGPT knows about them).
+  folder. It comes after the shared rules. It's separate from their "Info" (what SadGPT knows about them).
+
+When the persona a guest gets changes (a switch or an edit of its text, not the shared rules), the model
+starts over: earlier messages are left out of the prompt so it doesn't copy the old voice. The guest still
+sees the whole chat.
 
 Switches apply from the guest's next message.
 

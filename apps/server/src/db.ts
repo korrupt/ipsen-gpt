@@ -149,6 +149,16 @@ const MIGRATIONS: string[] = [
   -- At most one unused link per person; making a new one replaces it.
   CREATE UNIQUE INDEX invites_open ON invites (person_slug) WHERE used_at IS NULL;
   `,
+  `
+  -- The character the last reply was made with (a hash), and the first message id
+  -- the model sees: a persona switch or edit starts the model's memory over.
+  ALTER TABLE sessions ADD COLUMN persona_key TEXT;
+  ALTER TABLE sessions ADD COLUMN history_from INTEGER NOT NULL DEFAULT 0;
+  -- A person's persona is no longer copied into their session on approval; it is
+  -- looked up live, so People edits reach a claimed guest. Old copies can't be told
+  -- apart from picks made in Admin → Sessions, so claimed sessions start with none.
+  UPDATE sessions SET persona_id = NULL WHERE state = 'claimed';
+  `,
 ];
 
 export function openDb(dbPath: string): Db {

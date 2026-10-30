@@ -15,7 +15,7 @@ export interface Session {
   claimCode: string | null;
   /** One-off message for the guest, e.g. why they must pick a new name. */
   notice: string | null;
-  /** This session's persona; null: the global one. */
+  /** A persona picked for this session in Admin → Sessions; null: none (their person's, else the global one). */
   personaId: string | null;
   createdAt: number;
   lastSeenAt: number;
@@ -314,14 +314,35 @@ export class SessionStore {
     })();
   }
 
-  /** The last `limit` messages, oldest first. */
-  recentMessages(sessionId: string, limit: number): StoredMessage[] {
+  /** The last `limit` messages, oldest first; `fromId`: only messages with that id or later. */
+  recentMessages(sessionId: string, limit: number, fromId = 0): StoredMessage[] {
     const rows = this.db
       .prepare(
-        `SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?`,
+        `SELECT role, content, created_at FROM messages WHERE session_id = ? AND id >= ? ORDER BY id DESC LIMIT ?`,
       )
-      .all(sessionId, limit) as { role: 'user' | 'assistant'; content: string; created_at: number }[];
+      .all(sessionId, fromId, limit) as { role: 'user' | 'assistant'; content: string; created_at: number }[];
     return rows.reverse().map((r) => ({ role: r.role, content: r.content, createdAt: r.created_at }));
+  }
+
+  /**
+   * The first message id the model should see, given the persona about to be used.
+   * When `personaKey` differs from the last one, history starts over from the next
+   * message. (The first time, with no key stored yet, nothing is cut.)
+   */
+  historyStart(sessionId: string, personaKey: string): number {
+    return this.db.transaction(() => {
+      const row = this.db.prepare('SELECT persona_key, history_from FROM sessions WHERE id = ?').get(sessionId) as
+        | { persona_key: string | null; history_from: number }
+        | undefined;
+      if (!row || row.persona_key === personaKey) return row?.history_from ?? 0;
+      let from = row.history_from;
+      if (row.persona_key !== null) {
+        const last = this.db.prepare('SELECT MAX(id) AS id FROM messages WHERE session_id = ?').get(sessionId) as { id: number | null };
+        from = (last.id ?? 0) + 1;
+      }
+      this.db.prepare('UPDATE sessions SET persona_key = ?, history_from = ? WHERE id = ?').run(personaKey, from, sessionId);
+      return from;
+    })();
   }
 
   // --- Internals ------------------------------------------------------------
@@ -363,9 +384,9 @@ export class SessionStore {
     this.db
       .prepare(
         `UPDATE sessions SET name = ?, name_key = ?, state = 'claimed', person_slug = ?,
-           claim_code = NULL, claim_person_slug = NULL, notice = NULL, persona_id = COALESCE(?, persona_id) WHERE id = ?`,
+           claim_code = NULL, claim_person_slug = NULL, notice = NULL WHERE id = ?`,
       )
-      .run(person.name, key, person.slug, person.persona, id);
+      .run(person.name, key, person.slug, id);
     // Claims that could only have been this person are over.
     this.dropHopelessClaims(NOTICES.claimedByOther);
     return this.get(id)!;

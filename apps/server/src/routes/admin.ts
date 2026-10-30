@@ -5,7 +5,7 @@ import type { GateDef } from '../gateDefs.js';
 import { GateError, type Gate } from '../gates.js';
 import { allow, clientIp } from '../http.js';
 import { PeopleError, type Person } from '../people.js';
-import { PersonaError } from '../personas.js';
+import { PersonaError, type EffectivePersona } from '../personas.js';
 import { PointsError, type Reward } from '../points.js';
 import type { PhotoAttempt } from '../photos.js';
 import { SessionError, type Session } from '../sessions.js';
@@ -85,13 +85,25 @@ export function adminRouter(config: Config, services: Services): Router {
     /** Who a pending claim can be approved as: several for a shared alias, none if all are taken. */
     claimPeople: sessions.claimCandidates(s).map((p) => ({ slug: p.slug, name: p.name })),
     notice: s.notice,
-    /** null: the global persona. */
+    /** Picked in Sessions; null: none (their person's, else the global one). */
     personaId: s.personaId,
+    /** What they get right now and why, and what "no pick" would give them. */
+    persona: effectivePersona(s),
     points: points.total(s.id),
     createdAt: s.createdAt,
     lastSeenAt: s.lastSeenAt,
     messageCount: s.messageCount,
   });
+
+  const effectivePersona = (s: Session) => {
+    const person = s.state === 'claimed' && s.personSlug ? (people.get(s.personSlug) ?? null) : null;
+    try {
+      const view = ({ source, id, name }: EffectivePersona) => ({ source, id, name });
+      return { now: view(personas.effective(s, person)), withoutPick: view(personas.effective(null, person)) };
+    } catch {
+      return null; // no persona loads at all; System shows the errors
+    }
+  };
 
   const rewardSummary = (r: Reward) => ({ ...r });
 
@@ -282,7 +294,7 @@ export function adminRouter(config: Config, services: Services): Router {
     }),
   );
 
-  /** This guest's own persona; `id: null` puts them back on the global one. */
+  /** This guest's own persona; `id: null` drops the pick (their person's, else the global one). */
   router.put('/sessions/:id/persona', (req, res) => {
     const body = PersonaBody.safeParse(req.body);
     if (!body.success) {

@@ -10,12 +10,38 @@ export interface AdminSession {
   /** Who a pending claim can be approved as: several for a shared alias, none if all are taken. */
   claimPeople: { slug: string; name: string }[];
   notice: string | null;
-  /** This guest's own persona; null: the global one. */
+  /** Picked for this guest in Sessions; null: none (their person's, else the global one). */
   personaId: string | null;
+  /** What they get right now and why, and what "no pick" would give them (null: no persona loads). */
+  persona: { now: EffectivePersona; withoutPick: EffectivePersona } | null;
   points: number;
   createdAt: number;
   lastSeenAt: number;
   messageCount?: number;
+}
+
+export type PersonaSource = 'session' | 'person_custom' | 'person' | 'global' | 'default';
+
+export interface EffectivePersona {
+  source: PersonaSource;
+  id: string | null;
+  name: string;
+}
+
+/** Why a guest has the persona they have, e.g. "Ola's pick in People". */
+export function personaWhy(p: EffectivePersona, personName?: string | null): string {
+  switch (p.source) {
+    case 'session':
+      return 'picked for this guest';
+    case 'person_custom':
+      return 'written for them in People';
+    case 'person':
+      return `${personName ?? 'their person'}'s persona in People`;
+    case 'global':
+      return 'the global persona (System)';
+    case 'default':
+      return 'the default';
+  }
 }
 
 export interface PersonaInfo {

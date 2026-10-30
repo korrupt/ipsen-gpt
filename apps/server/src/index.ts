@@ -7,7 +7,7 @@ const config = parseConfig(process.env, baseDir);
 
 const services = createServices(config);
 // Fail fast on missing personas instead of on the first chat.
-services.personas.promptFor(null);
+services.personas.effective(null);
 const app = createApp({ config, services });
 const server = app.listen(config.port, config.host, () => {
   console.log(`SadGPT listening on http://${config.host}:${config.port}`);

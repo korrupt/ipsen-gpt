@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   adminApi,
   ago,
+  personaWhy,
   STATE_LABELS,
   type AdminGate,
   type AdminMessage,
@@ -62,6 +63,7 @@ export function SessionsTab({ toast }: Props) {
               </div>
               <div className="admin-muted">
                 {s.person ? `${s.person.name} · ` : ''}
+                {s.persona ? `${s.persona.now.name} · ` : ''}
                 {s.points} pts · {s.messageCount ?? 0} msgs · seen {ago(s.lastSeenAt)}
               </div>
             </button>
@@ -178,13 +180,23 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
       </div>
 
       <div className="card">
+        {session.persona && (
+          <p data-testid="persona-now">
+            Now: <strong>{session.persona.now.name}</strong>{' '}
+            <span className="admin-muted">({personaWhy(session.persona.now, session.person?.name)})</span>
+          </p>
+        )}
         <PersonaSelect
           id="session-persona"
           label="Persona for this guest"
           value={session.personaId}
           personas={personas}
           disabled={busy}
-          fallbackLabel={session.person?.hasCustomPersona ? `${session.person.name}'s own persona (People)` : undefined}
+          fallbackLabel={
+            session.persona
+              ? `No pick: ${session.persona.withoutPick.name} (${personaWhy(session.persona.withoutPick, session.person?.name)})`
+              : undefined
+          }
           onChange={(personaId) => void run('Persona changed', () => adminApi.setSessionPersona(session.id, personaId))}
         />
       </div>

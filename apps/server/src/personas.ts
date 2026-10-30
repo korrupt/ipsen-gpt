@@ -1,8 +1,9 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { z } from 'zod';
-import { slugify } from './people.js';
+import { slugify, type Person } from './people.js';
 import type { Session } from './sessions.js';
 import type { Settings } from './settings.js';
 
@@ -15,6 +16,21 @@ export interface Persona {
   /** The character: voice, quirks, examples. */
   body: string;
 }
+
+/** Where a session's persona comes from, most specific first. */
+export type PersonaSource = 'session' | 'person_custom' | 'person' | 'global' | 'default';
+
+/** The persona a session gets right now, and why. */
+export interface EffectivePersona {
+  source: PersonaSource;
+  /** null for a person's custom persona (it has no id). */
+  id: string | null;
+  name: string;
+  body: string;
+}
+
+/** The person a claimed session belongs to, as far as personas go. */
+export type PersonaOwner = Pick<Person, 'name' | 'persona' | 'customPersona'>;
 
 export interface PersonaInput {
   name: string;
@@ -212,27 +228,41 @@ export class PersonaStore {
 
   // --- Prompts --------------------------------------------------------------
 
-  /** The persona a session gets right now. Throws if none can be loaded. */
-  resolve(session: Pick<Session, 'personaId'> | null): Persona {
-    const candidates = [session?.personaId, this.settings.get('personaId'), this.defaultId];
-    for (const id of candidates) {
-      const p = id ? this.get(id) : undefined;
-      if (p) return p;
-    }
-    const first = this.load().personas[0];
-    if (first) return first;
-    throw new PersonaError(`No usable persona in ${this.dir}`);
+  /**
+   * The persona a session gets right now, worked out on every message so edits
+   * apply at once: the session's own pick (Sessions), else its person's custom
+   * persona, else its person's listed persona (People), else the global pick
+   * (System), else the default. A pick that no longer exists is skipped.
+   * Throws if no persona can be loaded at all.
+   */
+  effective(session: Pick<Session, 'personaId'> | null, person: PersonaOwner | null = null): EffectivePersona {
+    const from = (source: PersonaSource, p: Persona | undefined): EffectivePersona | undefined =>
+      p && { source, id: p.id, name: p.name, body: p.body };
+    const pick = (id: string | null | undefined) => (id ? this.get(id) : undefined);
+    const found =
+      from('session', pick(session?.personaId)) ??
+      (person?.customPersona
+        ? { source: 'person_custom' as const, id: null, name: `${person.name}'s own persona`, body: person.customPersona }
+        : undefined) ??
+      from('person', pick(person?.persona)) ??
+      from('global', pick(this.settings.get('personaId'))) ??
+      from('default', pick(this.defaultId)) ??
+      from('default', this.load().personas[0]);
+    if (!found) throw new PersonaError(`No usable persona in ${this.dir}`);
+    return found;
   }
 
   /**
    * The system prompt's start for a session: the shared rules, then the character.
-   * `custom` (a persona written for the person this session belongs to) is used
-   * unless the session has its own persona picked.
+   * `key` changes whenever the character does (a switch or an edit), not with the rules.
    */
-  promptFor(session: Pick<Session, 'personaId'> | null, custom: string | null = null): string {
+  promptFor(session: Pick<Session, 'personaId'> | null, person: PersonaOwner | null = null): { prompt: string; key: string } {
     const rules = this.rules();
-    const body = custom && !session?.personaId ? custom : this.resolve(session).body;
-    return rules ? `${rules}\n\n${body}` : body;
+    const { body } = this.effective(session, person);
+    return {
+      prompt: rules ? `${rules}\n\n${body}` : body,
+      key: crypto.createHash('sha256').update(body).digest('hex').slice(0, 16),
+    };
   }
 
   private check(input: PersonaInput): PersonaInput {

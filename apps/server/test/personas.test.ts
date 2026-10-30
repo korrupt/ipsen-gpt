@@ -56,7 +56,7 @@ describe('persona files', () => {
   });
 
   it('the shared rules come first, then the character', () => {
-    expect(env().services.personas.promptFor(null)).toBe('RULES-MARKER\n\nEMO-MARKER');
+    expect(env().services.personas.promptFor(null).prompt).toBe('RULES-MARKER\n\nEMO-MARKER');
   });
 });
 
@@ -96,7 +96,7 @@ describe('which persona a guest gets', () => {
     expect(lastSystem()).toContain('EMO-MARKER');
   });
 
-  it("a person's persona applies when their claim is approved, without overriding one set by hand", async () => {
+  it("a person's persona is looked up live: it applies once approved and follows edits in People", async () => {
     const e = env();
     writePerson(e.config.peopleDir, 'ola', 'Ola', [], 'Info');
     const file = path.join(e.config.peopleDir, 'ola', 'person.md');
@@ -107,9 +107,96 @@ describe('which persona a guest gets', () => {
     const { token, body } = await newGuest(e, 'Ola');
     expect(body.session.state).toBe('pending_claim');
     const id = e.services.sessions.byToken(token)!.id;
+    await chat(e, token);
+    expect(lastSystem()).toContain('EMO-MARKER'); // not them yet
     const cookie = await adminCookie(e);
     await request(e.app).post(`/api/admin/claims/${id}/approve`).set('cookie', cookie);
-    expect(e.services.sessions.get(id)?.personaId).toBe('drama');
+    expect(e.services.sessions.get(id)?.personaId).toBeNull(); // nothing copied
+    await chat(e, token);
+    expect(lastSystem()).toContain('DRAMA-MARKER');
+
+    // Changed in People after they were approved: the next message uses it.
+    await request(e.app).put('/api/admin/people/ola').set('cookie', cookie).send({ name: 'Ola', persona: 'nihilist' });
+    await chat(e, token);
+    expect(lastSystem()).toContain('NIHIL-MARKER');
+    await request(e.app).put('/api/admin/people/ola').set('cookie', cookie).send({ name: 'Ola', customPersona: 'OLA-CUSTOM' });
+    await chat(e, token);
+    expect(lastSystem()).toContain('OLA-CUSTOM');
+
+    // A pick made in Sessions still wins over the person's.
+    e.services.sessions.setPersona(id, 'sadgpt');
+    await chat(e, token);
+    expect(lastSystem()).toContain('EMO-MARKER');
+  });
+
+  it('admin sees what each guest gets now, why, and what no pick would give', async () => {
+    const e = env();
+    e.services.people.save({ name: 'Ola', aliases: [], info: '', persona: 'drama' });
+    const guest = await newGuest(e, 'Kari');
+    const cookie = await adminCookie(e);
+    const ola = e.services.sessions.joinAs('ola').session;
+    const summary = async (id: string) =>
+      (await request(e.app).get(`/api/admin/sessions/${id}`).set('cookie', cookie)).body.session.persona;
+
+    expect(await summary(e.services.sessions.byToken(guest.token)!.id)).toEqual({
+      now: { source: 'default', id: 'sadgpt', name: 'Emo SadGPT' },
+      withoutPick: { source: 'default', id: 'sadgpt', name: 'Emo SadGPT' },
+    });
+    e.services.personas.setActive('nihilist');
+    expect((await summary(ola.id)).now).toEqual({ source: 'person', id: 'drama', name: 'Dramatic SadGPT' });
+    e.services.sessions.setPersona(ola.id, 'sadgpt');
+    expect(await summary(ola.id)).toEqual({
+      now: { source: 'session', id: 'sadgpt', name: 'Emo SadGPT' },
+      withoutPick: { source: 'person', id: 'drama', name: 'Dramatic SadGPT' },
+    });
+    e.services.people.save({ name: 'Ola', aliases: [], info: '', customPersona: 'OLA-CUSTOM' }, 'ola');
+    expect((await summary(ola.id)).withoutPick).toEqual({ source: 'person_custom', id: null, name: "Ola's own persona" });
+    expect((await summary(e.services.sessions.byToken(guest.token)!.id)).now.source).toBe('global');
+  });
+});
+
+describe('history after a persona change', () => {
+  /** The user/assistant messages the model got on the last chat (system prompt left out). */
+  const lastHistory = () =>
+    (mock.requests.at(-1) as { messages: { role: string; content: string }[] }).messages
+      .filter((m) => m.role !== 'system')
+      .map((m) => m.content);
+
+  it('starts the model over after a switch or an edit, but not after a rules edit', async () => {
+    const e = env();
+    const { token } = await newGuest(e, 'Kari');
+    const id = e.services.sessions.byToken(token)!.id;
+    const send = (message: string) =>
+      request(e.app).post('/api/chat').set('authorization', `Bearer ${token}`).send({ message });
+
+    await send('one');
+    await send('two');
+    expect(lastHistory()).toEqual(['one', expect.any(String), 'two']);
+
+    e.services.personas.setActive('nihilist'); // switch
+    await send('three');
+    expect(lastHistory()).toEqual(['three']);
+    await send('four');
+    expect(lastHistory()).toEqual(['three', expect.any(String), 'four']);
+
+    writePersona(e.dir, 'nihilist', 'Nihilist SadGPT', 'NIHIL-EDITED'); // edit
+    await send('five');
+    expect(lastHistory()).toEqual(['five']);
+
+    fs.writeFileSync(path.join(e.dir, RULES_FILE), 'RULES-EDITED'); // rules only: history kept
+    await send('six');
+    expect(lastHistory()).toEqual(['five', expect.any(String), 'six']);
+
+    // The guest still sees everything.
+    expect(e.services.sessions.recentMessages(id, 100)).toHaveLength(12);
+  });
+
+  it('sessions from before the upgrade keep their history on the first message', async () => {
+    const e = env();
+    const { token } = await newGuest(e, 'Kari');
+    e.services.sessions.addExchange(e.services.sessions.byToken(token)!.id, 'earlier', 'boo');
+    await chat(e, token);
+    expect(lastHistory()).toEqual(['earlier', 'boo', 'hi']);
   });
 });
 
@@ -191,7 +278,7 @@ describe('editing personas', () => {
   it('copies the shipped personas into an empty folder once, and never over edits', () => {
     const { dir, store } = seeded();
     expect(store.seed().sort()).toEqual(['_rules.md', 'nihilist.md', 'sadgpt.md']);
-    expect(store.promptFor(null)).toBe('SHIPPED-RULES\n\nSHIPPED-EMO');
+    expect(store.promptFor(null).prompt).toBe('SHIPPED-RULES\n\nSHIPPED-EMO');
     store.save({ name: 'Emo SadGPT', description: '', body: 'EDITED' }, 'sadgpt');
     fs.rmSync(path.join(dir, 'nihilist.md'));
     expect(store.seed()).toEqual([]); // not empty: leave it alone
@@ -246,9 +333,9 @@ describe('editing personas', () => {
     const { store } = seeded();
     store.seed();
     expect(store.saveRules('  NEW-RULES  ')).toBe('NEW-RULES');
-    expect(store.promptFor(null)).toBe('NEW-RULES\n\nSHIPPED-EMO');
+    expect(store.promptFor(null).prompt).toBe('NEW-RULES\n\nSHIPPED-EMO');
     store.saveRules('');
-    expect(store.promptFor(null)).toBe('SHIPPED-EMO');
+    expect(store.promptFor(null).prompt).toBe('SHIPPED-EMO');
   });
 
   it('through the admin API, with edits reaching the next chat message', async () => {

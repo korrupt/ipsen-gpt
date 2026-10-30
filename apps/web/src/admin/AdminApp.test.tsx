@@ -545,8 +545,18 @@ describe('a persona written for one person', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false);
   });
 
-  it("Sessions: 'no pick' means their own persona when they have one", async () => {
-    const session = { ...KARI, name: 'Ola', state: 'claimed', person: { slug: 'ola', name: 'Ola', hasCustomPersona: true } };
+  it('Sessions: shows what the guest gets now and why, and what no pick means', async () => {
+    const session = {
+      ...KARI,
+      name: 'Ola',
+      state: 'claimed',
+      person: { slug: 'ola', name: 'Ola', hasCustomPersona: false },
+      personaId: 'sadgpt',
+      persona: {
+        now: { source: 'session', id: 'sadgpt', name: 'Emo SadGPT' },
+        withoutPick: { source: 'person', id: 'nihilist', name: 'Nihilist SadGPT' },
+      },
+    };
     loggedIn({
       'GET /api/admin/sessions': () => json({ sessions: [session] }),
       'GET /api/admin/sessions/s1': () => json({ session, messages: [], gates: [], photos: [] }),
@@ -555,7 +565,10 @@ describe('a persona written for one person', () => {
     });
     render(<AdminApp />);
     await userEvent.click(await screen.findByRole('button', { name: /^sessions$/i }));
-    await userEvent.click(await screen.findByTestId('session-row'));
-    expect(await screen.findByRole('option', { name: "Ola's own persona (People)" })).toBeTruthy();
+    const row = await screen.findByTestId('session-row');
+    expect(row.textContent).toContain('Emo SadGPT');
+    await userEvent.click(row);
+    expect(await screen.findByRole('option', { name: "No pick: Nihilist SadGPT (Ola's persona in People)" })).toBeTruthy();
+    expect(screen.getByTestId('persona-now').textContent).toBe('Now: Emo SadGPT (picked for this guest)');
   });
 });

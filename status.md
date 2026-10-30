@@ -46,11 +46,16 @@ fallback, live events) is deployed: it needs `OLLAMA_FIRST_TOKEN_TIMEOUT_MS=4500
   the agent (sadgpt = default emo, heartbroken, nihilist, goth-poet, sulky, drama). Ids `active` and `rules`
   are reserved (admin routes).
   `_rules.md` comes first in every prompt (language rule first, now English-only, see below; safety: sadness is comic, never real despair,
-  "you can't give points"). Resolution: session's own (Admin → Sessions) > global (Admin → System,
-  `settings.personaId`) > `DEFAULT_PERSONA`. A person's `persona:` in `person.md` is applied on claim approval/assign
-  (`COALESCE`, so it doesn't override one set by hand). A person can instead have a **custom persona** written just
-  for them (`people/<slug>/persona.md`, Admin → People "Custom"), used in their claimed session when the
-  session has no persona picked; setting one clears their listed `persona`.
+  "you can't give points"). Resolution, live on every message (`PersonaStore.effective`): session's own pick
+  (Admin → Sessions, `sessions.persona_id`) > claimed person's **custom persona** (`people/<slug>/persona.md`) >
+  person's listed `persona:` > global (Admin → System, `settings.personaId`) > `DEFAULT_PERSONA`. Setting a custom
+  persona clears the listed one. **Changed 2026-10-30** after the user found People edits didn't reach an
+  already-claimed guest: the person's persona used to be copied into the session on approval. Migration 6 cleared
+  `persona_id` on claimed sessions (old copies can't be told from hand picks). Admin → Sessions shows the
+  effective persona and its source.
+- **History resets on a persona change (2026-10-30, the user's pick):** `sessions.persona_key` (hash of the
+  character text) and `history_from` (first message id the model sees). A different key on the next message
+  cuts history there; rules edits don't count. Guests still see the whole chat.
 - **Points (Phase 5), decided with the user:** a ledger (`points` table). Sources for now: passed photo gates
   (once per gate, `gate_id` unique) and admin give/take with a reason (the guest gets a notice). Further
   sources are **still to be decided**. Leaderboard = named, live sessions with points; ties go to whoever got

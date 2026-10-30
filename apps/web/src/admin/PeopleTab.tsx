@@ -241,7 +241,7 @@ function PersonEditor({ person, onDone, toast }: { person: AdminPerson | null; o
       </label>
       <PersonaSelect
         id="person-persona"
-        label="Persona once you approve them (they can still be changed per session)"
+        label="Persona once you approve them (applies at once, also while they are here; a pick in Sessions wins)"
         value={persona}
         onChange={setPersona}
         personas={personas}

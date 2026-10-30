@@ -13,8 +13,8 @@ import type { Services } from './services.js';
 export interface AppDeps {
   config: Config;
   services: Services;
-  /** The persona prompt for a session (tests can override it). */
-  getPersona?: (session: Session) => string;
+  /** The persona prompt for a session and a key that changes with the character (tests can override it). */
+  getPersona?: (session: Session) => { prompt: string; key: string };
   log?: (msg: string, err?: unknown) => void;
 }
 
@@ -38,9 +38,9 @@ export function createApp({ config, services, getPersona, log = services.log }: 
       getPersona:
         getPersona ??
         ((session) => {
-          // A claimed person's own persona text, if you wrote one for them.
+          // A claimed person's persona (custom or listed) applies unless the session has its own pick.
           const person = session.state === 'claimed' && session.personSlug ? services.people.get(session.personSlug) : undefined;
-          return services.personas.promptFor(session, person?.customPersona ?? null);
+          return services.personas.promptFor(session, person ?? null);
         }),
       log,
     }),
