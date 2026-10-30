@@ -42,6 +42,13 @@ Personas are edited in Admin → System and re-read on every message, so edits a
 - A name or alias of a pre-registered person starts a **claim**: the guest gets a code like
   `BAT-427`, can chat as a plain guest meanwhile, and shows the code to you. Several guests can
   claim the same person at once; approving one turns the others away.
+- **Shared first names:** a display name belongs to one person, but several people can share an
+  alias (e.g. "Vanessa" on both Vanessa Berg and Vanessa Hansen). A guest typing it gets a normal
+  claim, and in Claims you tap **Approve as …** for the right one. The full names still claim just one person.
+- **Invite links:** Admin → People → a person → **Make invite link** (Share/Copy). Whoever opens it
+  first becomes that person, no claim code; it then stops working. Opened in a browser that already has
+  a session, that session becomes the person and keeps its chat and points. **New link** replaces it,
+  **Revoke** kills it. The token sits after the `#`, so it never reaches Nginx or Cloudflare logs.
 - Admin: set `ADMIN_PASSWORD` in `.env`, open `/admin/` (in dev: http://localhost:5173/admin/).
   Claims (search by code, approve/reject), Sessions (chat log, assign person, release name,
   end session), People (create/edit/delete).

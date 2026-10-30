@@ -95,7 +95,7 @@ describe('admin claims', () => {
       name: 'Ola',
       state: 'pending_claim',
       claimCode: real.body.session.claimCode,
-      claimPerson: { slug: 'ola-nordmann', name: 'Ola Nordmann' },
+      claimPeople: [{ slug: 'ola-nordmann', name: 'Ola Nordmann' }],
     });
 
     const code = real.body.session.claimCode.toLowerCase().replace('-', '');
@@ -120,6 +120,63 @@ describe('admin claims', () => {
     expect(res.body.session).toMatchObject({ state: 'guest', name: null });
     expect((await admin.post(`/api/admin/claims/${sessionId(e, g.token)}/reject`)).status).toBe(409);
     expect((await admin.post('/api/admin/claims/nope/approve')).status).toBe(409);
+  });
+});
+
+describe('admin claims with a shared alias', () => {
+  it('lists every matching person and approves as the one picked', async () => {
+    const e = makeEnv();
+    e.services.people.save({ name: 'Vanessa Berg', aliases: ['Vanessa'], info: '' });
+    e.services.people.save({ name: 'Vanessa Hansen', aliases: ['Vanessa'], info: '' });
+    const g = await newGuest(e, 'Vanessa');
+    const admin = as(e, await adminCookie(e));
+    const [claim] = (await admin.get('/api/admin/claims')).body.claims;
+    expect(claim.claimPeople).toEqual([
+      { slug: 'vanessa-berg', name: 'Vanessa Berg' },
+      { slug: 'vanessa-hansen', name: 'Vanessa Hansen' },
+    ]);
+    const id = sessionId(e, g.token);
+    const unpicked = await admin.post(`/api/admin/claims/${id}/approve`);
+    expect(unpicked.status).toBe(409);
+    expect(unpicked.body.error).toMatch(/Pick who they are/);
+    const res = await admin.post(`/api/admin/claims/${id}/approve`, { slug: 'vanessa-hansen' });
+    expect(res.body.session).toMatchObject({ state: 'claimed', name: 'Vanessa Hansen', claimPeople: [] });
+  });
+});
+
+describe('admin invite links', () => {
+  it('makes, shows, replaces and revokes a single unused link per person', async () => {
+    const e = makeEnv();
+    const ola = e.services.people.save({ name: 'Ola', aliases: [], info: '' }).slug;
+    const admin = as(e, await adminCookie(e));
+    expect((await admin.get('/api/admin/people')).body.people[0].invite).toBeNull();
+
+    const first = (await admin.post(`/api/admin/people/${ola}/invite`)).body.person.invite;
+    expect(first.token).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect((await admin.get('/api/admin/people')).body.people[0].invite).toEqual(first);
+
+    const second = (await admin.post(`/api/admin/people/${ola}/invite`)).body.person.invite;
+    expect(second.token).not.toBe(first.token);
+    expect((await request(e.app).post('/api/invite').send({ token: first.token })).status).toBe(410);
+
+    expect((await admin.del(`/api/admin/people/${ola}/invite`)).body.person.invite).toBeNull();
+    expect((await request(e.app).post('/api/invite').send({ token: second.token })).status).toBe(410);
+    expect((await admin.post('/api/admin/people/nobody/invite')).status).toBe(404);
+  });
+
+  it('deleting a person kills their link', async () => {
+    const e = makeEnv();
+    const ola = e.services.people.save({ name: 'Ola', aliases: [], info: '' }).slug;
+    const admin = as(e, await adminCookie(e));
+    const { token } = (await admin.post(`/api/admin/people/${ola}/invite`)).body.person.invite;
+    await admin.del(`/api/admin/people/${ola}`);
+    expect((await request(e.app).post('/api/invite').send({ token })).status).toBe(410);
+  });
+
+  it('is admin only', async () => {
+    const e = makeEnv();
+    const ola = e.services.people.save({ name: 'Ola', aliases: [], info: '' }).slug;
+    expect((await request(e.app).post(`/api/admin/people/${ola}/invite`)).status).toBe(401);
   });
 });
 
@@ -192,7 +249,7 @@ describe('admin people', () => {
     await admin.post('/api/admin/people', { name: 'Ola', aliases: [], info: '' });
     const clash = await admin.post('/api/admin/people', { name: 'Per', aliases: ['ola'], info: '' });
     expect(clash.status).toBe(409);
-    expect(clash.body.error).toMatch(/already used by Ola/);
+    expect(clash.body.error).toMatch(/Ola's display name/);
     expect((await admin.post('/api/admin/people', { name: '<script>' })).status).toBe(400);
     expect((await admin.post('/api/admin/people', { aliases: 'x' })).status).toBe(400);
   });

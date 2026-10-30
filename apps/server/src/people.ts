@@ -8,7 +8,7 @@ export interface Person {
   slug: string;
   /** Display name; also a reserved name. */
   name: string;
-  /** Other reserved names that claim this person. */
+  /** Other reserved names that claim this person. Several people may share an alias. */
   aliases: string[];
   /** Markdown body fed to the model once the claim is approved. */
   info: string;
@@ -87,6 +87,34 @@ export function serializePerson(p: PersonInput): string {
   return `---\n${fm}\n---\n\n${p.info.trim()}\n`;
 }
 
+/** Every name key that claims this person: the display name, then the aliases. */
+function reservedKeys(p: { name: string; aliases: string[] }): string[] {
+  return [...new Set([p.name, ...p.aliases].map(nameKey))];
+}
+
+/**
+ * A display name may not be anyone else's name or alias, and an alias may not be
+ * anyone else's display name. Aliases may be shared ("Vanessa" for two Vanessas):
+ * a guest typing it gets a claim, and the admin picks which person on approval.
+ */
+function nameClash(
+  p: { name: string; aliases: string[] },
+  slug: string,
+  reserved: Map<string, string[]>,
+  displayNames: Map<string, string>,
+): { name: string; owner: string } | null {
+  const own = nameKey(p.name);
+  const nameOwner = reserved.get(own)?.find((s) => s !== slug);
+  if (nameOwner) return { name: p.name, owner: nameOwner };
+  for (const alias of p.aliases) {
+    const key = nameKey(alias);
+    if (key === own) continue;
+    const owner = displayNames.get(key);
+    if (owner && owner !== slug) return { name: alias, owner };
+  }
+  return null;
+}
+
 function writeAtomic(file: string, content: string) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, content);
@@ -101,7 +129,10 @@ function writeAtomic(file: string, content: string) {
  */
 export class PeopleStore {
   private people = new Map<string, Person>();
-  private reserved = new Map<string, string>(); // name key -> slug
+  /** Name key -> slugs of the people it claims (several only for a shared alias). */
+  private reserved = new Map<string, string[]>();
+  /** Display-name key -> slug. A display name belongs to one person and is nobody's alias. */
+  private displayNames = new Map<string, string>();
   /** Problems found while loading, shown in admin. */
   errors: string[] = [];
 
@@ -112,7 +143,8 @@ export class PeopleStore {
 
   load(): void {
     const people = new Map<string, Person>();
-    const reserved = new Map<string, string>();
+    const reserved = new Map<string, string[]>();
+    const displayNames = new Map<string, string>();
     const errors: string[] = [];
 
     // Sorted so that on a name clash, the alphabetically first folder wins, every time.
@@ -134,18 +166,19 @@ export class PeopleStore {
         errors.push(`${slug}: ${err instanceof Error ? err.message : String(err)}`);
         continue;
       }
-      const keys = [...new Set([person.name, ...person.aliases].map(nameKey))];
-      const clash = keys.find((k) => reserved.has(k));
+      const clash = nameClash(person, slug, reserved, displayNames);
       if (clash) {
-        errors.push(`${slug}: name "${clash}" is already used by ${reserved.get(clash)}, skipped`);
+        errors.push(`${slug}: name "${clash.name}" is already used by ${clash.owner}, skipped`);
         continue;
       }
-      keys.forEach((k) => reserved.set(k, slug));
+      for (const k of reservedKeys(person)) reserved.set(k, [...(reserved.get(k) ?? []), slug]);
+      displayNames.set(nameKey(person.name), slug);
       people.set(slug, person);
     }
 
     this.people = new Map([...people].sort(([, a], [, b]) => a.name.localeCompare(b.name, 'nb')));
     this.reserved = reserved;
+    this.displayNames = displayNames;
     this.errors = errors;
   }
 
@@ -157,10 +190,10 @@ export class PeopleStore {
     return this.people.get(slug);
   }
 
-  /** The person whose name or alias matches, if the name is reserved. */
-  findByName(name: string): Person | undefined {
-    const slug = this.reserved.get(nameKey(name));
-    return slug ? this.people.get(slug) : undefined;
+  /** The people whose name or alias matches (several for a shared alias), sorted by name. */
+  findByName(name: string): Person[] {
+    const slugs = this.reserved.get(nameKey(name)) ?? [];
+    return this.list().filter((p) => slugs.includes(p.slug));
   }
 
   /** Creates (no slug) or updates a person. Returns the saved person. */
@@ -191,11 +224,15 @@ export class PeopleStore {
       for (let i = 2; this.people.has(slug) || fs.existsSync(path.join(this.dir, slug)); i++) slug = `${base}-${i}`;
     }
 
-    for (const n of [clean.name, ...clean.aliases]) {
-      const owner = this.reserved.get(nameKey(n));
-      if (owner && owner !== slug) {
-        throw new PeopleError(`"${n}" is already used by ${this.people.get(owner)?.name ?? owner}.`, 409);
-      }
+    const clash = nameClash(clean, slug, this.reserved, this.displayNames);
+    if (clash) {
+      const owner = this.people.get(clash.owner)?.name ?? clash.owner;
+      throw new PeopleError(
+        clash.name === clean.name
+          ? `"${clash.name}" is already used by ${owner}.`
+          : `"${clash.name}" is ${owner}'s display name. People can share an alias, not a display name.`,
+        409,
+      );
     }
 
     const folder = path.join(this.dir, slug);

@@ -16,7 +16,7 @@ const claim = (id: string, code: string, person = 'Ola Nordmann') => ({
   state: 'pending_claim',
   claimCode: code,
   person: null,
-  claimPerson: { slug: 'ola', name: person },
+  claimPeople: [{ slug: 'ola', name: person }],
   notice: null,
   createdAt: Date.now(),
   lastSeenAt: Date.now(),
@@ -86,9 +86,64 @@ describe('claims', () => {
   });
 });
 
+describe('claims with a shared alias', () => {
+  it('shows every matching person and approves as the one tapped', async () => {
+    const vanessa = {
+      ...claim('v', 'BAT-427'),
+      name: 'Vanessa',
+      claimPeople: [
+        { slug: 'vanessa-berg', name: 'Vanessa Berg' },
+        { slug: 'vanessa-hansen', name: 'Vanessa Hansen' },
+      ],
+    };
+    const fetch = loggedIn({
+      'GET /api/admin/claims': () => json({ claims: [vanessa] }),
+      'POST /api/admin/claims/v/approve': () => json({ session: { ...vanessa, name: 'Vanessa Hansen', state: 'claimed' } }),
+    });
+    render(<AdminApp />);
+    const card = await screen.findByTestId('claim');
+    expect(card.textContent).toContain('Wants to be one of Vanessa Berg or Vanessa Hansen');
+    expect(within(card).queryByRole('button', { name: 'Approve' })).toBeNull();
+    await userEvent.click(within(card).getByRole('button', { name: 'Approve as Vanessa Hansen' }));
+    expect((await screen.findByRole('status')).textContent).toBe('Approved: Vanessa Hansen');
+    expect(bodyOf(fetch, 'POST', '/api/admin/claims/v/approve')).toEqual({ slug: 'vanessa-hansen' });
+  });
+});
+
+describe('invite links', () => {
+  const OLA = { slug: 'ola', name: 'Ola', aliases: [], info: '', persona: null, customPersona: null, claimedBy: null, invite: null };
+
+  it('makes a link for a person, copies it, and revokes it', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText }, share: undefined });
+    const fetch = loggedIn({
+      'GET /api/admin/people': () => json({ people: [OLA], errors: [] }),
+      'GET /api/admin/personas': () => json(PERSONAS),
+      'POST /api/admin/people/ola/invite': () => json({ person: { ...OLA, invite: { token: 'tok123', createdAt: 1 } } }),
+      'DELETE /api/admin/people/ola/invite': () => json({ person: OLA }),
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^people$/i }));
+    await userEvent.click(await screen.findByTestId('person-row'));
+    const card = screen.getByTestId('invite-card');
+    expect(within(card).queryByLabelText('Invite link')).toBeNull();
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Make invite link' }));
+    const link = (await within(card).findByLabelText('Invite link')) as HTMLInputElement;
+    expect(link.value).toBe(`${window.location.origin}/#invite=tok123`);
+    expect(within(card).queryByRole('button', { name: 'Share' })).toBeNull(); // no Web Share here
+    await userEvent.click(within(card).getByRole('button', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/#invite=tok123`);
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Revoke' }));
+    await waitFor(() => expect(within(card).queryByLabelText('Invite link')).toBeNull());
+    expect(fetch.mock.calls.some(([u, init]) => u === '/api/admin/people/ola/invite' && init.method === 'DELETE')).toBe(true);
+  });
+});
+
 describe('sessions', () => {
   it('opens a session, shows its chat, and ends it after confirmation', async () => {
-    const s = { ...claim('s1', ''), name: 'Kari', state: 'guest', claimCode: null, claimPerson: null, messageCount: 2 };
+    const s = { ...claim('s1', ''), name: 'Kari', state: 'guest', claimCode: null, claimPeople: [], messageCount: 2 };
     const fetch = loggedIn({
       'GET /api/admin/sessions': () => json({ sessions: [s] }),
       'GET /api/admin/sessions/s1': () =>
@@ -258,7 +313,7 @@ const KARI = {
   state: 'guest',
   claimCode: null,
   person: null,
-  claimPerson: null,
+  claimPeople: [],
   notice: null,
   personaId: null,
   points: 12,

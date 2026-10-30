@@ -60,6 +60,8 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
   2. The guest can chat as a normal guest while pending, but their person file is not used.
   3. The guest finds me in person and shows the code. I approve it in admin (search by code, one tap).
   4. On approval, the session becomes `claimed` and the person file is attached. On rejection, the guest is asked to pick another name.
+- **Shared aliases:** a display name belongs to one person and is nobody else's alias, but several people may share an alias ("Vanessa"). Such a claim lists every matching person who isn't claimed yet, and admin picks one on approval (added 2026-10-30).
+- **Invite links:** admin can make a single-use link per person (`/#invite=<token>`, one unused link at a time). Opening it makes the guest that person without a claim code: their current session if they have one (keeping chat and points), otherwise a new one (added 2026-10-30).
 - **Admin can:** approve/reject claims, assign or reassign a person to any session, release a name, and end a session.
 - Session states: `guest`, `pending_claim`, `claimed`.
 - Rate limiting uses the client IP (`app.set('trust proxy', 'loopback')` behind Nginx) plus the session token.

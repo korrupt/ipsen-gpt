@@ -145,7 +145,7 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
         {session.person && <div>Person: {session.person.name}</div>}
         {session.claimCode && (
           <div>
-            Claim code <strong>{session.claimCode}</strong> for {session.claimPerson?.name}
+            Claim code <strong>{session.claimCode}</strong> for {session.claimPeople.map((p) => p.name).join(' or ') || '?'}
           </div>
         )}
         <div className="admin-muted">

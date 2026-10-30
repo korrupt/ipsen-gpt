@@ -136,6 +136,19 @@ const MIGRATIONS: string[] = [
   -- A persona for this session only (null: the global one).
   ALTER TABLE sessions ADD COLUMN persona_id TEXT;
   `,
+  `
+  -- Invite links: open one and you are that person, no claim code. Single use.
+  -- (sessions.claim_person_slug is no longer used: a claim's candidates come from its name.)
+  CREATE TABLE invites (
+    token       TEXT PRIMARY KEY,
+    person_slug TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    used_at     INTEGER,
+    used_by     TEXT REFERENCES sessions (id) ON DELETE SET NULL
+  );
+  -- At most one unused link per person; making a new one replaces it.
+  CREATE UNIQUE INDEX invites_open ON invites (person_slug) WHERE used_at IS NULL;
+  `,
 ];
 
 export function openDb(dbPath: string): Db {

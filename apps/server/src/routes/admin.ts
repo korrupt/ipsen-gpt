@@ -13,6 +13,8 @@ import type { Services } from '../services.js';
 
 const PasswordBody = z.object({ password: z.string().max(500) });
 const AssignBody = z.object({ slug: z.string().min(1) });
+/** `slug`: who to approve them as, when the claim matches several people (a shared alias). */
+const ApproveBody = z.object({ slug: z.string().min(1).optional() });
 const PauseBody = z.object({
   reason: z.string().trim().min(1, 'Write what guests should see while chat is paused.').max(300, 'Keep the reason under 300 characters.'),
 });
@@ -68,7 +70,7 @@ const RewardPatch = z
 
 export function adminRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { adminAuth, sessions, people, limiter, llm, settings, errors, gates, gateDefs, photos, events, personas, points, pushScores } = services;
+  const { adminAuth, sessions, invites, people, limiter, llm, settings, errors, gates, gateDefs, photos, events, personas, points, pushScores } = services;
 
   const personName = (slug: string | null) => (slug ? (people.get(slug)?.name ?? `${slug} (deleted)`) : null);
 
@@ -80,7 +82,8 @@ export function adminRouter(config: Config, services: Services): Router {
     person: s.personSlug
       ? { slug: s.personSlug, name: personName(s.personSlug), hasCustomPersona: !!people.get(s.personSlug)?.customPersona }
       : null,
-    claimPerson: s.claimPersonSlug ? { slug: s.claimPersonSlug, name: personName(s.claimPersonSlug) } : null,
+    /** Who a pending claim can be approved as: several for a shared alias, none if all are taken. */
+    claimPeople: sessions.claimCandidates(s).map((p) => ({ slug: p.slug, name: p.name })),
     notice: s.notice,
     /** null: the global persona. */
     personaId: s.personaId,
@@ -97,6 +100,11 @@ export function adminRouter(config: Config, services: Services): Router {
     claimedBy: (() => {
       const h = sessions.holderOf(p.slug);
       return h ? { id: h.id, name: h.name } : null;
+    })(),
+    /** The unused invite link, if any; the client builds the URL from the token. */
+    invite: (() => {
+      const i = invites.forPerson(p.slug);
+      return i ? { token: i.token, createdAt: i.createdAt } : null;
     })(),
   });
 
@@ -207,14 +215,19 @@ export function adminRouter(config: Config, services: Services): Router {
     res.json({ claims: sessions.pendingClaims(q).map(sessionSummary) });
   });
 
-  router.post('/claims/:id/approve', (req, res) =>
+  router.post('/claims/:id/approve', (req, res) => {
+    const body = ApproveBody.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ error: 'Pick a person' });
+      return;
+    }
     handle(res, () => {
-      const s = sessions.approveClaim(req.params.id);
+      const s = sessions.approveClaim(req.params.id, body.data.slug);
       gates.personAttached(s.id, s.personSlug!);
       pushScores(); // the leaderboard shows the new name
       return { session: sessionSummary(s) };
-    }),
-  );
+    });
+  });
 
   router.post('/claims/:id/reject', (req, res) =>
     handle(res, () => ({ session: sessionSummary(sessions.rejectClaim(req.params.id)) })),
@@ -495,6 +508,7 @@ export function adminRouter(config: Config, services: Services): Router {
 
   router.post('/people/reload', (_req, res) => {
     people.load();
+    sessions.peopleReloaded();
     res.json({ people: people.list().map(personView), errors: people.errors });
   });
 
@@ -532,6 +546,26 @@ export function adminRouter(config: Config, services: Services): Router {
     handle(res, () => {
       people.delete(req.params.slug);
       sessions.personDeleted(req.params.slug);
+      invites.revoke(req.params.slug);
+    }),
+  );
+
+  /** A new single-use invite link for this person (their previous unused one stops working). */
+  router.post('/people/:slug/invite', (req, res) =>
+    handle(res, () => {
+      const person = people.get(req.params.slug);
+      if (!person) throw new PeopleError('No such person.', 404);
+      invites.create(person.slug);
+      return { person: personView(person) };
+    }),
+  );
+
+  router.delete('/people/:slug/invite', (req, res) =>
+    handle(res, () => {
+      const person = people.get(req.params.slug);
+      if (!person) throw new PeopleError('No such person.', 404);
+      invites.revoke(person.slug);
+      return { person: personView(person) };
     }),
   );
 

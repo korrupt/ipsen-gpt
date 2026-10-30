@@ -5,6 +5,7 @@ import { ErrorLog } from './errorLog.js';
 import { EventHub } from './events.js';
 import { loadGateDefs, type GateDefSet } from './gateDefs.js';
 import { GateStore, gateView } from './gates.js';
+import { InviteStore } from './invites.js';
 import { Llm } from './llm.js';
 import { PeopleStore } from './people.js';
 import { PersonaStore } from './personas.js';
@@ -20,6 +21,8 @@ export interface Services {
   personas: PersonaStore;
   points: PointsStore;
   sessions: SessionStore;
+  /** Single-use invite links that make the guest a person without a claim code. */
+  invites: InviteStore;
   gates: GateStore;
   /** Current gate definitions, read from disk. */
   gateDefs: () => GateDefSet;
@@ -107,6 +110,7 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     personas,
     points,
     sessions,
+    invites: new InviteStore(db, now),
     gates,
     gateDefs,
     photos: new PhotoStore(db, config.photos.dir, now),

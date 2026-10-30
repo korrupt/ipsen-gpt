@@ -62,6 +62,15 @@ fallback, live events) is deployed: it needs `OLLAMA_FIRST_TOKEN_TIMEOUT_MS=4500
 - **Reserved names:** several guests may claim the same person in parallel. Approving one
   renames that session to the person's display name; the other claimants get a notice and must
   pick a new name.
+- **Shared aliases (2026-10-30, the user's pick):** several people may share an alias, but a display name
+  belongs to one person and is nobody else's alias. A claim's candidates are worked out from its name on
+  every read (`SessionStore.claimCandidates`: matching people not held by a live session), so
+  `sessions.claim_person_slug` is no longer used. Admin picks one on approval (`POST /claims/:id/approve {slug}`).
+  Claims with nobody left are turned away when someone is approved, deleted, edited or reloaded.
+- **Invite links (2026-10-30, the user's picks):** single use, one unused link per person (`invites` table,
+  token kept in plain text so admin can show it again). `POST /api/invite {token}` with the guest's Bearer
+  token attaches the person to that session (keeps chat and points); without one it makes a new, claimed
+  session. Link format `/#invite=<token>` (after the `#`, so it stays out of logs); the page strips it.
 - **Hourly backups are off on the droplet** (the user removed `/etc/cron.d/ipsengpt-backup` on 2026-10-27).
   `sudo ipsengpt-backup` still works by hand. Re-running `setup.sh` re-adds the cron job unless it gets `--skip backup`.
 - **Domain: `chat.ipsen.no`** (was `artifical.ipsen.no`; switched before the first real deploy). It must

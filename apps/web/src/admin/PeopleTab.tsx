@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { adminApi, type AdminPerson } from './api';
+import { adminApi, inviteUrl, type AdminPerson } from './api';
 import { PersonaSelect, usePersonas } from './PersonaSelect';
 import { usePoll } from './usePoll';
 
@@ -61,6 +61,7 @@ export function PeopleTab({ toast }: Props) {
               <div className="card__row">
                 <strong>{p.name}</strong>
                 {p.claimedBy && <span className="badge badge--claimed">Here</span>}
+                {!p.claimedBy && p.invite && <span className="badge">Invited</span>}
               </div>
               <div className="admin-muted">
                 {p.aliases.length ? `Also: ${p.aliases.join(', ')}` : 'No aliases'}
@@ -71,6 +72,96 @@ export function PeopleTab({ toast }: Props) {
         ))}
       </ul>
     </section>
+  );
+}
+
+/**
+ * A single-use link that makes whoever opens it this person, without a claim code.
+ * Opening it in a browser that already has a session keeps that session's chat and points.
+ */
+function InviteCard({ person, toast }: { person: AdminPerson; toast: (m: string) => void }) {
+  const [invite, setInvite] = useState(person.invite);
+  const [busy, setBusy] = useState(false);
+  const url = invite ? inviteUrl(invite.token) : null;
+
+  const run = async (fn: () => Promise<AdminPerson>, done: string) => {
+    setBusy(true);
+    try {
+      setInvite((await fn()).invite);
+      toast(done);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url!);
+      toast('Link copied');
+    } catch {
+      toast('Could not copy. Select the link and copy it by hand.');
+    }
+  };
+
+  const share = () => {
+    navigator.share({ title: 'SadGPT', text: `SadGPT has been expecting you, ${person.name}.`, url: url! }).catch(() => {});
+  };
+
+  return (
+    <div className="card" data-testid="invite-card">
+      <strong>Invite link</strong>
+      <p className="admin-muted">
+        Whoever opens it first becomes {person.name}, no claim code needed. It works once
+        {person.claimedBy ? ', and moves them away from the session that has them now' : ''}.
+      </p>
+      {url && (
+        <input
+          className="admin-input"
+          readOnly
+          aria-label="Invite link"
+          value={url}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+      )}
+      <div className="card__actions">
+        {url ? (
+          <>
+            {typeof navigator.share === 'function' && (
+              <button className="btn btn--primary" disabled={busy} onClick={share}>
+                Share
+              </button>
+            )}
+            <button className="btn" disabled={busy} onClick={() => void copy()}>
+              Copy
+            </button>
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() => void run(() => adminApi.createInvite(person.slug), 'New link made; the old one no longer works')}
+            >
+              New link
+            </button>
+            <button
+              className="btn btn--danger"
+              disabled={busy}
+              onClick={() => void run(() => adminApi.revokeInvite(person.slug), 'Link revoked')}
+            >
+              Revoke
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn btn--primary"
+            disabled={busy}
+            onClick={() => void run(() => adminApi.createInvite(person.slug), 'Invite link made')}
+          >
+            Make invite link
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -135,6 +226,7 @@ function PersonEditor({ person, onDone, toast }: { person: AdminPerson | null; o
       </button>
       <h2 className="admin-h2">{person ? `Edit ${person.name}` : 'New person'}</h2>
       {person?.claimedBy && <p className="admin-muted">Claimed by session “{person.claimedBy.name}”</p>}
+      {person && <InviteCard person={person} toast={toast} />}
       <label className="admin-label">
         Display name
         <input className="admin-input" value={name} maxLength={24} onChange={(e) => setName(e.target.value)} />

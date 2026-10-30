@@ -16,11 +16,14 @@ export function allow(limiter: RateLimiter, res: Response, key: string, rule: Ra
 
 export const clientIp = (req: Request) => req.ip ?? 'unknown';
 
+/** The guest's session token from `Authorization: Bearer <token>`, if sent. */
+export const bearerToken = (req: Request) => /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+
 /** Guest auth: `Authorization: Bearer <session token>`. */
 export function requireSession(sessions: SessionStore) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const m = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '');
-    const session = m ? sessions.byToken(m[1]!) : undefined;
+    const token = bearerToken(req);
+    const session = token ? sessions.byToken(token) : undefined;
     if (!session) {
       res.status(401).json({ error: 'session_invalid' });
       return;

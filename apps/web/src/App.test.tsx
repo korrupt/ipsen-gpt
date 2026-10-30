@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -87,6 +88,66 @@ describe('name picking', () => {
     render(<App />);
     expect(await screen.findByRole('textbox', { name: /your name/i })).toBeTruthy();
     expect(getToken()).toBeNull();
+  });
+});
+
+describe('invite links', () => {
+  const OLA = guestSession({ name: 'Ola Nordmann', state: 'claimed' });
+  const openInvite = (token: string) => window.history.replaceState(null, '', `/#invite=${token}`);
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  it('a new visitor joins as the person straight away, and the link leaves the address bar', async () => {
+    openInvite('inv1');
+    const fetch = fakeServer({
+      'POST /api/invite': () => json({ token: 'new-token', session: OLA, gate: null }, 201),
+      'GET /api/session': () => json({ session: OLA, messages: [] }),
+    });
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(screen.getByTestId('header-user').textContent).toBe('Ola Nordmann'));
+    expect(getToken()).toBe('new-token');
+    expect(window.location.hash).toBe('');
+    expect(screen.queryByRole('textbox', { name: /your name/i })).toBeNull();
+    const invites = fetch.mock.calls.filter(([u]) => u === '/api/invite');
+    expect(invites).toHaveLength(1); // once, even with StrictMode's double effects
+    expect(JSON.parse(invites[0]![1].body as string)).toEqual({ token: 'inv1' });
+    expect(new Headers(invites[0]![1].headers).get('authorization')).toBeNull();
+  });
+
+  it('a returning guest keeps their session (and its history): the link is sent with their token', async () => {
+    openInvite('inv2');
+    setToken('tok');
+    const fetch = fakeServer({
+      'POST /api/invite': () => json({ token: null, session: OLA, gate: null }),
+      'GET /api/session': () => json({ session: OLA, messages: [{ role: 'assistant', content: 'earlier answer' }] }),
+    });
+    render(<App />);
+    expect(await screen.findByText('earlier answer')).toBeTruthy();
+    expect(getToken()).toBe('tok');
+    const call = fetch.mock.calls.find(([u]) => u === '/api/invite')!;
+    expect(new Headers(call[1].headers).get('authorization')).toBe('Bearer tok');
+  });
+
+  it('a dead link: new visitors pick a name and see why', async () => {
+    openInvite('used');
+    fakeServer({ 'POST /api/invite': () => json({ error: "That invite link doesn't work anymore.", code: 'invite_invalid' }, 410) });
+    render(<App />);
+    expect((await screen.findByRole('status')).textContent).toBe("That invite link doesn't work anymore.");
+    expect(nameInput()).toBeTruthy();
+  });
+
+  it('a dead link: returning guests carry on in their session', async () => {
+    openInvite('used');
+    asReturningGuest({
+      'POST /api/invite': () => json({ error: "That invite link doesn't work anymore.", code: 'invite_invalid' }, 410),
+    });
+    render(<App />);
+    await waitFor(() => expect(input()).toBeTruthy());
+    expect(screen.getByTestId('header-user').textContent).toBe('Kari');
+    expect(screen.getByText("That invite link doesn't work anymore.")).toBeTruthy();
   });
 });
 

@@ -7,7 +7,8 @@ export interface AdminSession {
   claimCode: string | null;
   /** `hasCustomPersona`: you wrote a persona just for them (People). */
   person: { slug: string; name: string; hasCustomPersona?: boolean } | null;
-  claimPerson: { slug: string; name: string } | null;
+  /** Who a pending claim can be approved as: several for a shared alias, none if all are taken. */
+  claimPeople: { slug: string; name: string }[];
   notice: string | null;
   /** This guest's own persona; null: the global one. */
   personaId: string | null;
@@ -73,6 +74,8 @@ export interface AdminPerson {
   /** A persona written just for them; used instead of `persona`. */
   customPersona: string | null;
   claimedBy: { id: string; name: string | null } | null;
+  /** The unused single-use invite link, if any. */
+  invite: { token: string; createdAt: number } | null;
 }
 
 export interface PersonInput {
@@ -211,7 +214,9 @@ export const adminApi = {
   logout: () => call<{ ok: true }>('POST', '/logout', {}),
 
   claims: () => call<{ claims: AdminSession[] }>('GET', '/claims').then((r) => r.claims),
-  approve: (id: string) => call<{ session: AdminSession }>('POST', `/claims/${id}/approve`, {}).then((r) => r.session),
+  /** `slug`: who to approve them as, when the claim matches several people. */
+  approve: (id: string, slug?: string) =>
+    call<{ session: AdminSession }>('POST', `/claims/${id}/approve`, slug ? { slug } : {}).then((r) => r.session),
   reject: (id: string) => call<{ session: AdminSession }>('POST', `/claims/${id}/reject`, {}).then((r) => r.session),
 
   sessions: () => call<{ sessions: AdminSession[] }>('GET', '/sessions').then((r) => r.sessions),
@@ -264,7 +269,12 @@ export const adminApi = {
   updatePerson: (slug: string, p: PersonInput) =>
     call<{ person: AdminPerson }>('PUT', `/people/${slug}`, p).then((r) => r.person),
   deletePerson: (slug: string) => call<{ ok: true }>('DELETE', `/people/${slug}`),
+  createInvite: (slug: string) => call<{ person: AdminPerson }>('POST', `/people/${slug}/invite`, {}).then((r) => r.person),
+  revokeInvite: (slug: string) => call<{ person: AdminPerson }>('DELETE', `/people/${slug}/invite`).then((r) => r.person),
 };
+
+/** The link a guest opens to join as this person (the token stays out of server logs, after the #). */
+export const inviteUrl = (token: string, origin = window.location.origin) => `${origin}/#invite=${token}`;
 
 /** "just now", "3 min ago", "2 h ago". */
 export function ago(ms: number, now = Date.now()): string {

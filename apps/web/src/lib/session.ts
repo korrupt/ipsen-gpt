@@ -92,6 +92,29 @@ export async function createSession(name: string): Promise<{ session: SessionVie
   return { session, gate: gate ?? null };
 }
 
+/**
+ * Opens an invite link (`/#invite=<token>`): the guest becomes that person at
+ * once. Sends the current token, if any, so that session is the one that changes.
+ */
+export async function redeemInvite(invite: string): Promise<void> {
+  const { token } = await request<{ token: string | null }>('POST', '/api/invite', { token: invite });
+  if (token) setToken(token);
+}
+
+/** The invite token in the URL (`#invite=...`), if this page was opened from an invite link. */
+export function inviteFromUrl(hash = window.location.hash): string | null {
+  return new URLSearchParams(hash.replace(/^#/, '')).get('invite') || null;
+}
+
+/** Removes the invite from the address bar, so a reload or a shared screenshot doesn't carry it. */
+export function clearInviteFromUrl(): void {
+  try {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  } catch {
+    // ignore
+  }
+}
+
 export function fetchSession(): Promise<{ session: SessionView; messages: HistoryItem[]; gate?: GateView | null }> {
   return request('GET', '/api/session');
 }

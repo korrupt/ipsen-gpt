@@ -13,7 +13,6 @@ export interface Session {
   state: SessionState;
   personSlug: string | null;
   claimCode: string | null;
-  claimPersonSlug: string | null;
   /** One-off message for the guest, e.g. why they must pick a new name. */
   notice: string | null;
   /** This session's persona; null: the global one. */
@@ -60,7 +59,6 @@ interface Row {
   state: SessionState;
   person_slug: string | null;
   claim_code: string | null;
-  claim_person_slug: string | null;
   notice: string | null;
   persona_id: string | null;
   created_at: number;
@@ -73,7 +71,6 @@ const toSession = (r: Row): Session => ({
   state: r.state,
   personSlug: r.person_slug,
   claimCode: r.claim_code,
-  claimPersonSlug: r.claim_person_slug,
   notice: r.notice,
   personaId: r.persona_id,
   createdAt: r.created_at,
@@ -125,6 +122,16 @@ export class SessionStore {
     return rows.map(toSession).filter((s) => !q || normalizeClaimQuery(s.claimCode ?? '').includes(q));
   }
 
+  /**
+   * Who a pending claim could be approved as: the people its name matches
+   * (several for a shared alias) that no live session holds yet. Worked out
+   * from the name each time, so edits to people apply to waiting claims too.
+   */
+  claimCandidates(s: Session): Person[] {
+    if (s.state !== 'pending_claim' || s.name === null) return [];
+    return this.people.findByName(s.name).filter((p) => !this.holderOf(p.slug));
+  }
+
   /** The live session that holds this person, if any. */
   holderOf(slug: string): Session | undefined {
     const row = this.db
@@ -158,15 +165,8 @@ export class SessionStore {
   // --- Guest actions --------------------------------------------------------
 
   create(rawName: string): { token: string; session: Session } {
-    const token = newToken();
-    const id = crypto.randomUUID();
-    const now = this.now();
     return this.db.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO sessions (id, token_hash, state, created_at, last_seen_at) VALUES (?, ?, 'guest', ?, ?)`,
-        )
-        .run(id, hashToken(token), now, now);
+      const { token, id } = this.insert();
       return { token, session: this.setName(id, rawName) };
     })();
   }
@@ -186,15 +186,15 @@ export class SessionStore {
       if (s.name !== null) throw new NameError('You already have a name.', 'already_named');
 
       const key = nameKey(name);
-      const person = this.people.findByName(name);
-      if (person) {
-        if (this.holderOf(person.slug)) throw new NameError('That name is taken.', 'taken');
+      const matches = this.people.findByName(name);
+      if (matches.length) {
+        if (matches.every((p) => this.holderOf(p.slug))) throw new NameError('That name is taken.', 'taken');
         this.db
           .prepare(
             `UPDATE sessions SET name = ?, name_key = ?, state = 'pending_claim', claim_code = ?,
-               claim_person_slug = ?, notice = NULL WHERE id = ?`,
+               notice = NULL WHERE id = ?`,
           )
-          .run(name, key, this.uniqueClaimCode(), person.slug, id);
+          .run(name, key, this.uniqueClaimCode(), id);
       } else {
         if (this.nameHolder(key)) throw new NameError('That name is taken.', 'taken');
         this.db
@@ -207,12 +207,15 @@ export class SessionStore {
 
   // --- Admin actions --------------------------------------------------------
 
-  approveClaim(id: string): Session {
+  /** `slug` picks the person when the claim matches several (a shared alias). */
+  approveClaim(id: string, slug?: string): Session {
     return this.db.transaction(() => {
       const s = this.get(id);
-      if (!s || s.state !== 'pending_claim' || !s.claimPersonSlug) throw new SessionError('No pending claim.');
-      const person = this.people.get(s.claimPersonSlug);
-      if (!person) throw new SessionError('That person no longer exists.');
+      if (!s || s.state !== 'pending_claim') throw new SessionError('No pending claim.');
+      const candidates = this.claimCandidates(s);
+      if (candidates.length === 0) throw new SessionError('Nobody left to approve that claim as. Reject it.');
+      const person = slug === undefined && candidates.length === 1 ? candidates[0] : candidates.find((p) => p.slug === slug);
+      if (!person) throw new SessionError(`Pick who they are: ${candidates.map((p) => p.name).join(' or ')}.`);
       return this.attachPerson(id, person);
     })();
   }
@@ -231,6 +234,21 @@ export class SessionStore {
       const person = this.people.get(slug);
       if (!person) throw new SessionError('No such person.', 404);
       return this.attachPerson(id, person);
+    })();
+  }
+
+  /**
+   * Joins as a person from an invite link: attaches them to the guest's current
+   * session if there is one, otherwise to a new session. `token` is set only for
+   * a new session (the guest already has the token of their current one).
+   */
+  joinAs(slug: string, currentId?: string): { token: string | null; session: Session } {
+    return this.db.transaction(() => {
+      const person = this.people.get(slug);
+      if (!person) throw new SessionError('No such person.', 404);
+      if (currentId && this.get(currentId)) return { token: null, session: this.attachPerson(currentId, person) };
+      const { token, id } = this.insert();
+      return { token, session: this.attachPerson(id, person) };
     })();
   }
 
@@ -254,24 +272,35 @@ export class SessionStore {
     if (r.changes === 0) throw new SessionError('Session not found', 404);
   }
 
-  /** After a person is deleted: claimants are turned away, the holder keeps their name as a plain guest. */
+  /** After a person is deleted: claimants left with nobody are turned away, the holder keeps their name as a plain guest. */
   personDeleted(slug: string): void {
     this.db.transaction(() => {
-      for (const s of this.pendingFor(slug)) this.clearName(s.id, NOTICES.claimRejected);
       this.db
         .prepare(`UPDATE sessions SET state = 'guest', person_slug = NULL WHERE person_slug = ? AND ${LIVE}`)
         .run(slug);
+      this.dropHopelessClaims(NOTICES.claimRejected);
     })();
   }
 
-  /** After a person is edited: the holder follows a display-name change if the name is free. */
+  /**
+   * After a person is edited: the holder follows a display-name change if the name
+   * is free, and claims whose name no longer matches anyone are turned away.
+   */
   personUpdated(person: Person): void {
-    const holder = this.holderOf(person.slug);
-    if (!holder || holder.name === person.name) return;
-    const key = nameKey(person.name);
-    const other = this.nameHolder(key);
-    if (other && other.id !== holder.id) return;
-    this.db.prepare('UPDATE sessions SET name = ?, name_key = ? WHERE id = ?').run(person.name, key, holder.id);
+    this.db.transaction(() => {
+      this.peopleReloaded();
+      const holder = this.holderOf(person.slug);
+      if (!holder || holder.name === person.name) return;
+      const key = nameKey(person.name);
+      const other = this.nameHolder(key);
+      if (other && other.id !== holder.id) return;
+      this.db.prepare('UPDATE sessions SET name = ?, name_key = ? WHERE id = ?').run(person.name, key, holder.id);
+    })();
+  }
+
+  /** After people change on disk: claims whose name no longer matches anyone are turned away. */
+  peopleReloaded(): void {
+    this.dropHopelessClaims(NOTICES.claimRejected);
   }
 
   // --- Messages -------------------------------------------------------------
@@ -305,12 +334,22 @@ export class SessionStore {
     return row && toSession(row);
   }
 
-  private pendingFor(slug: string): Session[] {
-    return (
-      this.db
-        .prepare(`SELECT * FROM sessions WHERE state = 'pending_claim' AND claim_person_slug = ? AND ${LIVE}`)
-        .all(slug) as Row[]
-    ).map(toSession);
+  /** Turns away pending claims with nobody left to be approved as. */
+  private dropHopelessClaims(notice: string): void {
+    for (const s of this.pendingClaims()) {
+      if (this.claimCandidates(s).length === 0) this.clearName(s.id, notice);
+    }
+  }
+
+  /** A new nameless session. Must run inside a transaction (the caller names it). */
+  private insert(): { token: string; id: string } {
+    const token = newToken();
+    const id = crypto.randomUUID();
+    const now = this.now();
+    this.db
+      .prepare(`INSERT INTO sessions (id, token_hash, state, created_at, last_seen_at) VALUES (?, ?, 'guest', ?, ?)`)
+      .run(id, hashToken(token), now, now);
+    return { token, id };
   }
 
   /** Must run inside a transaction. */
@@ -318,9 +357,6 @@ export class SessionStore {
     const key = nameKey(person.name);
     const previous = this.holderOf(person.slug);
     if (previous && previous.id !== id) this.clearName(previous.id, NOTICES.claimedByOther);
-    for (const s of this.pendingFor(person.slug)) {
-      if (s.id !== id) this.clearName(s.id, NOTICES.claimedByOther);
-    }
     const squatter = this.nameHolder(key);
     if (squatter && squatter.id !== id) this.clearName(squatter.id, NOTICES.nameReleased);
 
@@ -330,6 +366,8 @@ export class SessionStore {
            claim_code = NULL, claim_person_slug = NULL, notice = NULL, persona_id = COALESCE(?, persona_id) WHERE id = ?`,
       )
       .run(person.name, key, person.slug, person.persona, id);
+    // Claims that could only have been this person are over.
+    this.dropHopelessClaims(NOTICES.claimedByOther);
     return this.get(id)!;
   }
 

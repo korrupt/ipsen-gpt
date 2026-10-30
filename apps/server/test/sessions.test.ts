@@ -39,7 +39,7 @@ describe('naming', () => {
     expect(session.state).toBe('pending_claim');
     expect(session.name).toBe('ola');
     expect(session.claimCode).toMatch(CLAIM_CODE_PATTERN);
-    expect(session.claimPersonSlug).toBe(ola);
+    expect(store().claimCandidates(session).map((p) => p.slug)).toEqual([ola]);
     expect(session.personSlug).toBeNull();
   });
 
@@ -100,6 +100,97 @@ describe('claims', () => {
     const { session } = store().create('Kari');
     expect(() => store().approveClaim(session.id)).toThrow(/No pending claim/);
     expect(() => store().rejectClaim('nope')).toThrow(/No pending claim/);
+  });
+});
+
+describe('shared aliases', () => {
+  let berg: string;
+  let hansen: string;
+  beforeEach(() => {
+    berg = env.services.people.save({ name: 'Vanessa Berg', aliases: ['Vanessa'], info: '' }).slug;
+    hansen = env.services.people.save({ name: 'Vanessa Hansen', aliases: ['Vanessa'], info: '' }).slug;
+  });
+  const candidates = (id: string) => store().claimCandidates(store().get(id)!).map((p) => p.slug);
+
+  it('a shared alias makes one claim that could be either person', () => {
+    const { session } = store().create('vanessa');
+    expect(session.state).toBe('pending_claim');
+    expect(candidates(session.id)).toEqual([berg, hansen]);
+    // The full name still points at one person.
+    expect(candidates(store().create('Vanessa Hansen').session.id)).toEqual([hansen]);
+  });
+
+  it('the admin must pick who, and only from the matching people', () => {
+    const { session } = store().create('Vanessa');
+    expect(() => store().approveClaim(session.id)).toThrow(/Pick who they are: Vanessa Berg or Vanessa Hansen/);
+    expect(() => store().approveClaim(session.id, ola)).toThrow(/Pick who they are/);
+    expect(store().approveClaim(session.id, hansen)).toMatchObject({ state: 'claimed', name: 'Vanessa Hansen', personSlug: hansen });
+  });
+
+  it('once one is claimed, other claims narrow to the rest; claims only for the taken one end', () => {
+    const a = store().create('Vanessa').session;
+    const b = store().create('Vanessa').session;
+    const onlyHansen = store().create('vanessa hansen').session;
+    store().approveClaim(a.id, hansen);
+    expect(candidates(b.id)).toEqual([berg]);
+    expect(store().get(onlyHansen.id)).toMatchObject({ name: null, notice: NOTICES.claimedByOther });
+    // With one left, approving needs no pick.
+    expect(store().approveClaim(b.id)).toMatchObject({ name: 'Vanessa Berg' });
+    // Both taken: the alias is taken too.
+    expect(nameErr(() => store().create('Vanessa'))).toBe('taken');
+  });
+
+  it('a claim whose name stops matching anyone is turned away; one that still matches someone stays', () => {
+    const { session } = store().create('Vanessa');
+    env.services.people.delete(berg);
+    store().personDeleted(berg);
+    expect(candidates(session.id)).toEqual([hansen]);
+    const updated = env.services.people.save({ name: 'Vanessa Hansen', aliases: [], info: '' }, hansen);
+    store().personUpdated(updated);
+    expect(store().get(session.id)).toMatchObject({ state: 'guest', name: null, notice: NOTICES.claimRejected });
+  });
+});
+
+describe('joining by invite', () => {
+  it('without a session: a new session, already claimed, under the display name', () => {
+    const { token, session } = store().joinAs(ola);
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(store().byToken(token!)?.id).toBe(session.id);
+    expect(session).toMatchObject({ state: 'claimed', name: 'Ola Nordmann', personSlug: ola, claimCode: null });
+  });
+
+  it('with a session (named, pending or nameless): that session becomes the person and keeps its history', () => {
+    for (const name of ['Kari', 'Ola', null]) {
+      const { session } = name ? store().create(name) : store().create('Temp');
+      if (!name) store().releaseName(session.id);
+      store().addExchange(session.id, 'hi', 'boo');
+      const joined = store().joinAs(ola, session.id);
+      expect(joined.token).toBeNull();
+      expect(joined.session).toMatchObject({ id: session.id, state: 'claimed', name: 'Ola Nordmann' });
+      expect(store().recentMessages(session.id, 10)).toHaveLength(2);
+      store().end(session.id);
+    }
+  });
+
+  it('moves the person from whoever held them, and ends other claims for them', () => {
+    const holder = store().create('Per').session;
+    store().assignPerson(holder.id, ola);
+    const { session } = store().joinAs(ola);
+    expect(store().get(holder.id)).toMatchObject({ name: null, personSlug: null, notice: NOTICES.claimedByOther });
+    expect(store().holderOf(ola)?.id).toBe(session.id);
+  });
+
+  it('an ended current session gets a new one instead', () => {
+    const old = store().create('Kari').session;
+    store().end(old.id);
+    const joined = store().joinAs(ola, old.id);
+    expect(joined.token).not.toBeNull();
+    expect(joined.session.id).not.toBe(old.id);
+  });
+
+  it('refuses a person that does not exist', () => {
+    expect(() => store().joinAs('nobody')).toThrow(/No such person/);
+    expect(store().list()).toHaveLength(0);
   });
 });
 

@@ -15,10 +15,13 @@ import type { GateView, VerifyResult } from './lib/photos';
 import {
   ApiError,
   chooseName,
+  clearInviteFromUrl,
   createSession,
   fetchLeaderboard,
   fetchSession,
   getToken,
+  inviteFromUrl,
+  redeemInvite,
   SessionGoneError,
   type HistoryItem,
   type SessionView,
@@ -41,7 +44,11 @@ type Screen =
 
 export function App() {
   useVisualViewport();
-  const [screen, setScreen] = useState<Screen>(() => (getToken() ? { kind: 'loading' } : { kind: 'name', notice: null, existing: false }));
+  /** Opened from an invite link: join as that person before anything else. */
+  const [invite] = useState(() => inviteFromUrl());
+  const [screen, setScreen] = useState<Screen>(() =>
+    invite || getToken() ? { kind: 'loading' } : { kind: 'name', notice: null, existing: false },
+  );
   const [session, setSession] = useState<SessionView | null>(null);
   /** The photo gate blocking the chat, if any. */
   const [gate, setGate] = useState<GateView | null>(null);
@@ -82,9 +89,31 @@ export function App() {
     }
   }, [applySession]);
 
+  // Runs once (the ref survives StrictMode's double effect): an invite link is single use.
+  const started = useRef(false);
   useEffect(() => {
-    if (getToken()) void load();
-  }, [load]);
+    if (started.current) return;
+    started.current = true;
+    if (!invite) {
+      if (getToken()) void load();
+      return;
+    }
+    clearInviteFromUrl();
+    void (async () => {
+      try {
+        await redeemInvite(invite);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Something went wrong. Try again.';
+        // A dead link: carry on as before, or pick a name like everyone else.
+        if (!getToken()) {
+          setScreen({ kind: 'name', notice: message, existing: false });
+          return;
+        }
+        setToast(message);
+      }
+      await load();
+    })();
+  }, [invite, load]);
 
   // Live updates while chatting: gates the moment they start, and whether chat is open.
   const inChat = screen.kind === 'chat';

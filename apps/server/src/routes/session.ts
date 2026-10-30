@@ -1,14 +1,17 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { allow, clientIp, requireSession, sessionOf, sessionView } from '../http.js';
+import { allow, bearerToken, clientIp, requireSession, sessionOf, sessionView } from '../http.js';
 import { gateView } from '../gates.js';
-import { NameError } from '../sessions.js';
+import { NameError, SessionError } from '../sessions.js';
 import type { Services } from '../services.js';
 
 const NameBody = z.object({ name: z.string().max(200) });
+const InviteBody = z.object({ token: z.string().min(1).max(100) });
 
-export function sessionRouter(config: Config, { sessions, gates, limiter, points, scoreboard }: Services): Router {
+export const INVITE_INVALID = "That invite link doesn't work anymore. Ask SadGPT's human for a new one, or just pick a name.";
+
+export function sessionRouter(config: Config, { sessions, invites, gates, limiter, points, scoreboard, pushScores }: Services): Router {
   const router = Router();
   /** The gate the guest must pass before chatting, if any. */
   const currentGate = (sessionId: string) => {
@@ -35,6 +38,40 @@ export function sessionRouter(config: Config, { sessions, gates, limiter, points
     } catch (err) {
       nameError(res, err);
     }
+  });
+
+  /**
+   * Opens an invite link: the guest becomes its person at once, no claim code.
+   * With a live session (Bearer token), that session becomes the person and
+   * keeps its chat and points; without one, a new session is made (201, with token).
+   */
+  router.post('/invite', (req, res) => {
+    const body = InviteBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: INVITE_INVALID, code: 'invite_invalid' });
+      return;
+    }
+    if (!allow(limiter, res, `invite:ip:${clientIp(req)}`, config.rateLimits.sessionCreatePerIp)) return;
+    const token = bearerToken(req);
+    const current = token ? sessions.byToken(token) : undefined;
+    let joined;
+    try {
+      joined = invites.redeem(body.data.token, (slug) => sessions.joinAs(slug, current?.id));
+    } catch (err) {
+      if (!(err instanceof SessionError)) throw err;
+      joined = null; // the person was deleted
+    }
+    if (!joined) {
+      res.status(410).json({ error: INVITE_INVALID, code: 'invite_invalid' });
+      return;
+    }
+    const { session } = joined;
+    if (joined.token) gates.sessionStarted(session.id);
+    gates.personAttached(session.id, session.personSlug!);
+    pushScores(); // a new name on the leaderboard, or a claimant turned away
+    res
+      .status(joined.token ? 201 : 200)
+      .json({ token: joined.token, session: sessionView(session), gate: currentGate(session.id) });
   });
 
   router.get('/session', requireSession(sessions), (_req, res) => {

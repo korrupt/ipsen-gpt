@@ -30,15 +30,15 @@ describe('PeopleStore', () => {
   it('loads folders, reserves names and aliases case-insensitively, and reports broken folders', () => {
     const dir = tempDir();
     writePerson(dir, 'ola', 'Ola Nordmann', ['Ola'], 'Info about Ola');
-    writePerson(dir, 'zkari', 'Kari', ['ola'], 'Clashes with Ola'); // alias collides; loaded after ola
+    writePerson(dir, 'zkari', 'ola', [], 'Clashes with Ola'); // display name is Ola's alias; loaded after ola
     fs.mkdirSync(path.join(dir, 'Bad Folder'));
     fs.mkdirSync(path.join(dir, 'empty'));
     const store = new PeopleStore(dir);
 
     expect(store.list().map((p) => p.slug)).toEqual(['ola']);
-    expect(store.findByName('  OLA ')?.slug).toBe('ola');
-    expect(store.findByName('ola nordmann')?.slug).toBe('ola');
-    expect(store.findByName('Kari')).toBeUndefined();
+    expect(store.findByName('  OLA ').map((p) => p.slug)).toEqual(['ola']);
+    expect(store.findByName('ola nordmann').map((p) => p.slug)).toEqual(['ola']);
+    expect(store.findByName('Kari')).toEqual([]);
     expect(store.errors).toHaveLength(3);
     expect(store.errors.join('\n')).toMatch(/zkari: name "ola" is already used by ola/);
   });
@@ -65,11 +65,32 @@ describe('PeopleStore', () => {
     expect(fs.readFileSync(path.join(dir, p.slug, 'gates.json'), 'utf8')).toContain('custom');
   });
 
-  it('refuses names already used by someone else, and invalid names', () => {
+  it('refuses display names already used by someone else, and invalid names', () => {
     const store = new PeopleStore(tempDir());
     store.save({ name: 'Ola', aliases: ['Olsen'], info: '' });
-    expect(() => store.save({ name: 'Kari', aliases: ['OLSEN'], info: '' })).toThrow(/already used by Ola/);
+    // A display name can't be another person's name or alias...
+    expect(() => store.save({ name: 'OLSEN', aliases: [], info: '' })).toThrow(/"OLSEN" is already used by Ola/);
+    expect(() => store.save({ name: 'ola', aliases: [], info: '' })).toThrow(/already used by Ola/);
+    // ...and an alias can't be another person's display name.
+    expect(() => store.save({ name: 'Kari', aliases: ['ola'], info: '' })).toThrow(/Ola's display name/);
     expect(() => store.save({ name: '<b>', aliases: [], info: '' })).toThrow(PeopleError);
+  });
+
+  it('lets several people share an alias, and finds all of them by it', () => {
+    const dir = tempDir();
+    const store = new PeopleStore(dir);
+    const berg = store.save({ name: 'Vanessa Berg', aliases: ['Vanessa', 'Nessa'], info: '' });
+    const hansen = store.save({ name: 'Vanessa Hansen', aliases: ['vanessa'], info: '' });
+    expect(store.findByName('VANESSA').map((p) => p.slug)).toEqual([berg.slug, hansen.slug]);
+    expect(store.findByName('Nessa').map((p) => p.slug)).toEqual([berg.slug]);
+    expect(store.findByName('vanessa hansen').map((p) => p.slug)).toEqual([hansen.slug]);
+    // Same from disk, with no load errors.
+    const fresh = new PeopleStore(dir);
+    expect(fresh.errors).toEqual([]);
+    expect(fresh.findByName('Vanessa')).toHaveLength(2);
+    // Editing one keeps the shared alias.
+    store.save({ name: 'Vanessa Hansen', aliases: ['Vanessa', 'VH'], info: 'x' }, hansen.slug);
+    expect(store.findByName('Vanessa')).toHaveLength(2);
   });
 
   it('delete moves the folder to .trash and refuses path tricks', () => {
@@ -78,7 +99,7 @@ describe('PeopleStore', () => {
     const p = store.save({ name: 'Ola', aliases: [], info: '' });
     store.delete(p.slug);
     expect(store.get(p.slug)).toBeUndefined();
-    expect(store.findByName('Ola')).toBeUndefined();
+    expect(store.findByName('Ola')).toEqual([]);
     expect(fs.readdirSync(path.join(dir, '.trash'))[0]).toMatch(/^ola-\d+$/);
     expect(() => store.delete('../etc')).toThrow(/No such person/);
     expect(() => store.save({ name: 'X', aliases: [], info: '' }, '../../x')).toThrow(/No such person/);

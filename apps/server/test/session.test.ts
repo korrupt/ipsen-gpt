@@ -37,6 +37,61 @@ describe('guest session API', () => {
     expect(JSON.stringify(body)).not.toMatch(/secret info|Nordmann|ola-nordmann/);
   });
 
+  describe('POST /api/invite', () => {
+    const setup = () => {
+      const e = makeEnv();
+      const slug = e.services.people.save({ name: 'Ola Nordmann', aliases: ['Ola'], info: 'secret info' }).slug;
+      return { e, slug, token: e.services.invites.create(slug).token };
+    };
+    const redeem = (e: ReturnType<typeof makeEnv>, token: string, sessionToken?: string) => {
+      const r = request(e.app).post('/api/invite').send({ token });
+      return sessionToken ? r.set('authorization', `Bearer ${sessionToken}`) : r;
+    };
+
+    it('without a session: a new, already claimed session, and only the guest view', async () => {
+      const { e, token } = setup();
+      const res = await redeem(e, token);
+      expect(res.status).toBe(201);
+      expect(res.body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(res.body.session).toEqual({ name: 'Ola Nordmann', state: 'claimed', claimCode: null, notice: null });
+      expect(JSON.stringify(res.body)).not.toMatch(/secret info|ola-nordmann/);
+      expect((await get(e.app, res.body.token)).body.session.state).toBe('claimed');
+    });
+
+    it('with a session: that session becomes the person (no new token)', async () => {
+      const { e, token } = setup();
+      const guest = await newGuest(e, 'Ola'); // even mid-claim
+      const res = await redeem(e, token, guest.token);
+      expect(res.status).toBe(200);
+      expect(res.body.token).toBeNull();
+      expect((await get(e.app, guest.token)).body.session).toMatchObject({ name: 'Ola Nordmann', state: 'claimed', claimCode: null });
+      expect(e.services.sessions.list()).toHaveLength(1);
+    });
+
+    it('works once', async () => {
+      const { e, token } = setup();
+      expect((await redeem(e, token)).status).toBe(201);
+      const again = await redeem(e, token);
+      expect(again.status).toBe(410);
+      expect(again.body.code).toBe('invite_invalid');
+      expect(e.services.sessions.list()).toHaveLength(1);
+    });
+
+    it('refuses unknown tokens and bad bodies without making a session', async () => {
+      const { e } = setup();
+      expect((await redeem(e, 'nope')).status).toBe(410);
+      expect((await request(e.app).post('/api/invite').send({})).status).toBe(400);
+      expect(e.services.sessions.list()).toHaveLength(0);
+    });
+
+    it("a deleted person's link fails and stays unused", async () => {
+      const { e, slug, token } = setup();
+      e.services.people.delete(slug);
+      expect((await redeem(e, token)).status).toBe(410);
+      expect(e.services.sessions.list()).toHaveLength(0);
+    });
+  });
+
   it('GET /api/session returns the session and its history; 401 for unknown tokens', async () => {
     const e = makeEnv();
     const { token } = await newGuest(e, 'Kari');

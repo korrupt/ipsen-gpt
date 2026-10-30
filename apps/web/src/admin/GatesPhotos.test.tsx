@@ -74,7 +74,7 @@ const kari = {
   state: 'guest',
   claimCode: null,
   person: null,
-  claimPerson: null,
+  claimPeople: [],
   notice: null,
   createdAt: Date.now(),
   lastSeenAt: Date.now(),
