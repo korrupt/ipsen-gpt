@@ -11,10 +11,11 @@ DOCKERFILE
 
 out=$(docker run --rm -v "$DEPLOY_DIR/droplet:/setup:ro" "$IMAGE" bash -euo pipefail -c '
   export APP_ROOT=/srv/ipsengpt BACKUP_KEEP=2
-  mkdir -p $APP_ROOT/db $APP_ROOT/people/ola $APP_ROOT/photos
+  mkdir -p $APP_ROOT/db $APP_ROOT/people/ola $APP_ROOT/photos $APP_ROOT/gates
   db=$APP_ROOT/db/ipsengpt.sqlite
   sqlite3 $db "PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);" >/dev/null
   echo "name: Ola" > $APP_ROOT/people/ola/person.md
+  echo "[{\"id\":\"hat\"}]" > $APP_ROOT/gates/gates.json
   head -c 100000 /dev/urandom > $APP_ROOT/photos/a.jpg
 
   # A writer hammering the DB while backups run (the app keeps writing at the party).
@@ -27,6 +28,7 @@ out=$(docker run --rm -v "$DEPLOY_DIR/droplet:/setup:ro" "$IMAGE" bash -euo pipe
   echo "integrity=$(sqlite3 $APP_ROOT/backups/$first/ipsengpt.sqlite "PRAGMA integrity_check")"
   echo "rows_gt0=$(( $(sqlite3 $APP_ROOT/backups/$first/ipsengpt.sqlite "SELECT COUNT(*) FROM t") > 0 ))"
   echo "people=$(cat $APP_ROOT/backups/$first/people/ola/person.md)"
+  echo "gates=$(cat $APP_ROOT/backups/$first/gates/gates.json)"
   wait $writer
 
   sleep 1; head -c 1000 /dev/urandom > $APP_ROOT/photos/b.jpg
@@ -46,6 +48,7 @@ out=$(docker run --rm -v "$DEPLOY_DIR/droplet:/setup:ro" "$IMAGE" bash -euo pipe
 assert_contains "$out" "integrity=ok" "snapshot taken during writes passes integrity_check"
 assert_contains "$out" "rows_gt0=1" "snapshot contains data"
 assert_contains "$out" "people=name: Ola" "people folders are backed up"
+assert_contains "$out" 'gates=[{"id":"hat"}]' "gates are backed up"
 assert_contains "$out" "rows_final=3000" "later backup has every row"
 assert_contains "$out" "hardlinked=yes" "unchanged photos are hard-linked, not copied"
 assert_contains "$out" "new_photo=yes" "new photos are included"

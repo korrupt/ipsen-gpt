@@ -131,6 +131,11 @@ textarea {
   line-height: 1.5;
 }
 
+/* A line or two (gate prompts), not a document. */
+.admin-textarea--short {
+  min-height: 0;
+}
+
 .admin-label {
   display: flex;
   flex-direction: column;
@@ -506,4 +511,21 @@ a.btn {
 .secrets-word {
   font-weight: 700;
   letter-spacing: 0.04em;
+}
+
+/* Gate editor */
+.gate-editor__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.gate-editor__help {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.gates__new {
+  width: 100%;
+  margin-bottom: 8px;
 }

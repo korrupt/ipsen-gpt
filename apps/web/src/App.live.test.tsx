@@ -95,6 +95,25 @@ describe('live events', () => {
     expect(screen.queryByText('Bring me a pumpkin!')).toBeNull();
   });
 
+  it('a text gate asks for an answer in the chat; a passing reply clears it', async () => {
+    const HAIKU = { id: 'g2', kind: 'text', prompt: 'Write me a haiku about pumpkins.', deadlineAt: null };
+    const { live, fetch } = returningGuest({
+      'POST /api/chat': () => streamResponse([tokens('Fine. That is actually it.'), sse('gate', null), sse('done', {})]).response,
+    });
+    render(<App />);
+    await waitFor(() => expect(live.connections()).toBe(1));
+    await live.push('gate', { gate: HAIKU });
+    expect(screen.getByText('Write me a haiku about pumpkins.')).toBeTruthy();
+    expect(screen.getByTestId('gate-text-hint')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /take photo/i })).toBeNull();
+
+    await userEvent.type(input(), 'Orange gourd grinning{Enter}');
+    expect(await screen.findByText('Fine. That is actually it.')).toBeTruthy();
+    expect(screen.queryByText('Write me a haiku about pumpkins.')).toBeNull();
+    const sent = fetch.mock.calls.find(([url]) => url === '/api/chat')!;
+    expect(JSON.parse(sent[1].body as string)).toEqual({ message: 'Orange gourd grinning' });
+  });
+
   it('show a gate that arrives with a reply, after the reply', async () => {
     const { live } = returningGuest({
       'POST /api/chat': () => streamResponse([tokens('Fine, ', 'mortal.'), sse('gate', PUMPKIN), sse('done', {})]).response,

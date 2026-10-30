@@ -91,7 +91,9 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
 ## Photo gates (enforced in code, never by the LLM)
 
 ### Definitions
-- `gates.json` defines gates: `id`, `target` (text used in the verification prompt), `guest_prompt` (what IpsenGPT demands, in character), `refusal_lines`, `points`, `trigger`.
+- `gates.json` defines gates: `id`, `kind` (`photo` or `text`), `target` (text used in the verification prompt), `guest_prompt` (what IpsenGPT demands, in character), `refusal_lines`, `points`, `trigger`.
+- **Text gates** (added 2026-10-30): the guest answers in the normal chat; each message goes to a separate judge call (JSON verdict, temperature 0, message fenced as data) instead of the chat model. A confident yes passes; otherwise a refusal plus the judge's one-line reason.
+- **Gates are edited in admin** (create/edit/delete, for everyone or one person). Global gates live in the data folder, seeded once from the shipped `content/gates.json` (like personas).
 - Each person's folder can define custom gates (`people/<slug>/gates.json`) that only apply to that person.
 - **Trigger types** (each gate has one, configurable):
   - `session_start`: verify-your-humanity gate before chatting
@@ -187,7 +189,7 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
 - Features:
   - **Claims:** pending list, search by code, approve/reject in one tap
   - **Sessions:** list with name, state, last seen, active gates/curses; view a session's chat; assign/reassign person; release name; end session
-  - **Gates:** force a gate (from `gates.json` or custom free-text target) on one session or all; reset a session's gates
+  - **Gates:** create, edit and delete gate definitions (photo or text, for everyone or one person); force a gate (defined or custom) on one session or all; reset a session's gates
   - **Curses:** clear one or all
   - **People:** create/edit/delete person files
   - **Photos:** gallery (filter passed/failed/unverified/flagged), view full-size, **delete** (removes files + record; guests ask me in person)

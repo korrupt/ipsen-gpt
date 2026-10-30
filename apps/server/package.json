@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "mock:ollama": "tsx src/dev/mock-ollama-cli.ts",
     "secrets:probe": "tsx src/dev/secrets-probe.ts",
+    "text-gate:probe": "tsx src/dev/text-gate-probe.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",

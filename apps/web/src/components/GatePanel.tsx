@@ -11,6 +11,8 @@ interface Props {
   onExpired: () => void;
 }
 
+export const TEXT_GATE_HINT = 'Answer in the chat below. SadGPT judges every message until one is good enough.';
+
 export const CONSENT_LABEL = "I'm responsible for this photo and it may be shared after the party";
 export const UNREADABLE_PHOTO = "Couldn't read that photo. Try another one.";
 
@@ -80,6 +82,27 @@ export function GatePanel({ gate, onResult, onSessionGone, onExpired }: Props) {
       setBusy(false);
     }
   };
+
+  if (gate.kind === 'text') {
+    return (
+      <section className="gate" aria-label="Challenge">
+        <div className="gate__box">
+          <div className="gate__head">
+            <div className="portrait gate__portrait" aria-hidden="true" />
+            <p className="gate__prompt">{gate.prompt}</p>
+          </div>
+          {secondsLeft !== null && (
+            <p className="gate__deadline" data-testid="gate-deadline">
+              {mmss(secondsLeft)} left
+            </p>
+          )}
+          <p className="gate__hint" data-testid="gate-text-hint">
+            {TEXT_GATE_HINT}
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="gate" aria-label="Photo challenge">

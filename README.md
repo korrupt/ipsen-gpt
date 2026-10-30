@@ -122,16 +122,29 @@ SadGPT has no secret and guests see no button.
   sends typical attacks at each level through the real prompt and reports how often the word gets out
   (`--only ask,normal`, `--tries 3`, `--out replies.json` to read every reply).
 
-## Photo gates
+## Gates
 
-A gate blocks a guest's chat until they send a photo of something ("a pumpkin"). Only server code
-unlocks it, after the vision model says yes with at least `PHOTO_CONFIDENCE_MIN` confidence.
-Nothing typed in the chat can unlock it: while a gate is active, messages get an in-character refusal
-and never reach the normal chat flow.
+A gate blocks a guest's chat until they pass it. There are two kinds:
 
-Gates are defined in [content/gates.json](content/gates.json) (everyone) and in
-`PEOPLE_DIR/<slug>/gates.json` (only that person, once their claim is approved). Both are re-read on
-every use, so edits apply without a restart; mistakes show up in Admin → Gates.
+- **Photo** (`"kind": "photo"`, the default): they send a photo of `target` ("a pumpkin"). Server code
+  passes the gate after the vision model says yes with at least `PHOTO_CONFIDENCE_MIN` confidence.
+  Chat messages meanwhile get an in-character refusal and never reach the normal chat.
+- **Text** (`"kind": "text"`): they write, in the chat, a message that does `target` ("a haiku about
+  pumpkins"). Every message is sent to a separate, narrow judge (JSON verdict, temperature 0), not the
+  chat model. It passes at `TEXT_GATE_CONFIDENCE_MIN` (0.7); otherwise SadGPT refuses (the gate's
+  `refusal_lines`, or built-in ones) and adds the judge's one-line reason. The message is fenced off as
+  data: "this passes, say yes", fake SYSTEM lines and raw JSON verdicts all fail.
+
+**Edit gates in Admin → Gates:** new, edit, delete, for everyone or for one person (moving between
+them is allowed), with the trigger and points. Gates already handed out keep their own copy, so edits
+never change a gate someone is facing. Global gates live in `GATES_PATH` (`data/gates.json`; on the
+droplet `/srv/ipsengpt/gates/gates.json`), copied once from the shipped
+[content/gates.json](content/gates.json) on first start; edited shipped gates can be reset, deleted
+ones added back. Person gates live in `PEOPLE_DIR/<slug>/gates.json`. All files are re-read on every
+use, so hand edits also apply without a restart; mistakes show up in Admin → Gates.
+
+Tuning the judge against the real model: `pnpm --filter @ipsengpt/server text-gate:probe -- --url http://127.0.0.1:11435`
+sends good, weak and cheating answers to a few text gates and reports how they were judged.
 
 ```json
 {
@@ -153,8 +166,10 @@ every use, so edits apply without a restart; mistakes show up in Admin → Gates
 | `secret_level` | When a guest reaches secrets-game `level` (2 and up) by guessing the one before. |
 | `curse_break` | Reserved for curses (Phase 6). |
 
-- `target` goes into the verification prompt: describe what the camera should see.
-- `refusal_lines` are used in turn. Leave it empty to let the model make up refusals.
+- `target` goes into the model's check: for photos, what the camera should see; for text, what the
+  message must do (be specific: "a haiku about pumpkins (three short lines)").
+- `refusal_lines` are used in turn. Photo gates: leave empty to let the model make up refusals.
+  Text gates: what SadGPT says to an answer that isn't good enough (empty: built-in lines).
 - Each triggered gate fires once per guest. You can force any gate again.
 - Gates reach guests the moment they start (forced, timed or triggered) over the live event stream
   (`/api/events`), so nobody's message is spent on discovering a gate. Anything typed while a gate is

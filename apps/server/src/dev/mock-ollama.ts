@@ -34,6 +34,13 @@ const VERDICTS = {
   bad: 'I think it is probably fine?',
 } as const;
 
+/** The same verdicts for a text-gate answer (its JSON has `passes`). */
+const TEXT_VERDICTS = {
+  pass: JSON.stringify({ passes: true, confidence: 0.9, reason: 'Mock: that does it.' }),
+  fail: JSON.stringify({ passes: false, confidence: 0.85, reason: 'Mock: that is not a haiku.' }),
+  bad: VERDICTS.bad,
+} as const;
+
 export interface MockOllamaOptions {
   port?: number;
   host?: string;
@@ -114,7 +121,8 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
     res.setHeader('content-type', 'application/x-ndjson');
     const verdictText = () => {
       if (typeof verdict === 'object') return verdict.text;
-      return VERDICTS[verdict === 'cycle' ? (verdictCount++ % 2 === 0 ? 'fail' : 'pass') : verdict];
+      const table = (body.format as { properties?: object }).properties && 'passes' in (body.format as { properties: object }).properties ? TEXT_VERDICTS : VERDICTS;
+      return table[verdict === 'cycle' ? (verdictCount++ % 2 === 0 ? 'fail' : 'pass') : verdict];
     };
     const text = body.format
       ? verdictText()

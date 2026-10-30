@@ -84,7 +84,7 @@ describe('GET /api/events', () => {
     const { token, body } = await newGuest(e, 'Kari');
     const live = await connect(await listen(e), token);
     expect(await live.next('status')).toEqual(OPEN);
-    expect(await live.next('gate')).toEqual({ gate: { id: body.gate.id, prompt: 'Show me a pumpkin!', deadlineAt: null } });
+    expect(await live.next('gate')).toEqual({ gate: { id: body.gate.id, kind: 'photo', prompt: 'Show me a pumpkin!', deadlineAt: null } });
   });
 
   it('pushes a gate the admin forces at once, and its removal when cancelled', async () => {

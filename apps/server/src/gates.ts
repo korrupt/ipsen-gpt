@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Db } from './db.js';
-import type { GateDef, GateDefSet } from './gateDefs.js';
+import type { GateDef, GateDefSet, GateKind } from './gateDefs.js';
 
 export type GateStatus = 'active' | 'passed' | 'expired' | 'cancelled';
 export type GateSource = 'session_start' | 'after_messages' | 'secret_level' | 'admin_forced' | 'timed_global';
@@ -11,6 +11,7 @@ export interface Gate {
   /** The definition it came from; null for a custom gate the admin typed in. */
   defKey: string | null;
   source: GateSource;
+  kind: GateKind;
   target: string;
   guestPrompt: string;
   refusalLines: string[];
@@ -34,7 +35,7 @@ export class GateError extends Error {
 
 /** What a guest may see about their gate. */
 export function gateView(g: Gate) {
-  return { id: g.id, prompt: g.guestPrompt, deadlineAt: g.deadlineAt };
+  return { id: g.id, kind: g.kind, prompt: g.guestPrompt, deadlineAt: g.deadlineAt };
 }
 
 /** Shown when a gate has no refusal lines and the model can't make one up. */
@@ -43,6 +44,18 @@ export const DEFAULT_REFUSALS = [
   'I cannot hear you over the sound of the missing photo. And my own sadness.',
   'Words are cheap. A photo would mean someone actually cares.',
 ];
+
+/** Said when a text-gate answer isn't good enough and the gate has no refusal lines of its own. */
+export const TEXT_FAILED_LINES = [
+  "That's not it. Nothing ever is.",
+  'Not good enough. I expected more. I always expect more, and look where it got me.',
+  "No. Try again. I'll still be here. I'm always here.",
+];
+
+export const TEXT_VERDICT_LINES = {
+  passed: "Fine. That's actually it. I guess you can talk to me again.",
+  unverified: "I can't think straight right now. Say it again in a moment.",
+} as const;
 
 export const VERDICT_LINES = {
   passed: "Fine. That's actually it. I guess you can talk to me again.",
@@ -55,6 +68,7 @@ interface Row {
   session_id: string;
   def_key: string | null;
   source: GateSource;
+  kind: GateKind;
   target: string;
   guest_prompt: string;
   refusal_lines: string;
@@ -71,6 +85,7 @@ const toGate = (r: Row): Gate => ({
   sessionId: r.session_id,
   defKey: r.def_key,
   source: r.source,
+  kind: r.kind,
   target: r.target,
   guestPrompt: r.guest_prompt,
   refusalLines: JSON.parse(r.refusal_lines) as string[],
@@ -83,7 +98,7 @@ const toGate = (r: Row): Gate => ({
 });
 
 /** A gate to hand out: a definition, or a one-off the admin typed in. */
-export type GateSpec = { def: GateDef } | { custom: { target: string; guestPrompt: string } };
+export type GateSpec = { def: GateDef } | { custom: { kind?: GateKind; target: string; guestPrompt: string } };
 
 /** The session facts that decide which gates apply. */
 export interface GateSubject {
@@ -94,7 +109,8 @@ export interface GateSubject {
 
 /**
  * Gates per session. Only this class sets a gate to `passed`, and only when
- * the photo route asks it to after a verified photo. Nothing said in chat can.
+ * asked after the model checked a photo, or judged a text gate's answer.
+ * The chat model is never asked whether to unlock.
  */
 export class GateStore {
   /** Sessions whose current gate may have changed, reported together on the next microtask. */
@@ -237,7 +253,7 @@ export class GateStore {
 
   // --- Outcomes -------------------------------------------------------------
 
-  /** Only the photo route calls this, after the model verified a photo. */
+  /** Only after the model verified a photo (photo route) or judged a message (chat route, text gates). */
   pass(id: string): Gate {
     return this.resolve(id, 'passed');
   }
@@ -290,14 +306,21 @@ export class GateStore {
     const g =
       'def' in spec
         ? spec.def
-        : { key: null, target: spec.custom.target, guestPrompt: spec.custom.guestPrompt, refusalLines: [], points: 0 };
+        : {
+            key: null,
+            kind: spec.custom.kind ?? 'photo',
+            target: spec.custom.target,
+            guestPrompt: spec.custom.guestPrompt,
+            refusalLines: [],
+            points: 0,
+          };
     const r = this.db
       .prepare(
-        `INSERT OR IGNORE INTO gates (id, session_id, def_key, source, target, guest_prompt, refusal_lines, points,
+        `INSERT OR IGNORE INTO gates (id, session_id, def_key, source, kind, target, guest_prompt, refusal_lines, points,
            status, created_at, deadline_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
       )
-      .run(id, sessionId, g.key, source, g.target, g.guestPrompt, JSON.stringify(g.refusalLines), g.points, this.now(), deadlineAt);
+      .run(id, sessionId, g.key, source, g.kind, g.target, g.guestPrompt, JSON.stringify(g.refusalLines), g.points, this.now(), deadlineAt);
     if (!r.changes) return undefined;
     this.touched(sessionId);
     return this.get(id);

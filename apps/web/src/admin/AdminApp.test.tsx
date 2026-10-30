@@ -387,7 +387,7 @@ describe('personas', () => {
     const fetch = loggedIn({
       'GET /api/admin/sessions': () => json({ sessions: [session] }),
       'GET /api/admin/sessions/s1': () => json({ session, messages: [], gates: [], photos: [] }),
-      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [] }),
+      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [], missingShipped: [] }),
       'GET /api/admin/personas': () => json(PERSONAS),
       'PUT /api/admin/sessions/s1/persona': (init) => {
         session = { ...session, personaId: JSON.parse(init.body as string).id };
@@ -560,7 +560,7 @@ describe('a persona written for one person', () => {
     loggedIn({
       'GET /api/admin/sessions': () => json({ sessions: [session] }),
       'GET /api/admin/sessions/s1': () => json({ session, messages: [], gates: [], photos: [] }),
-      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [] }),
+      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [], missingShipped: [] }),
       'GET /api/admin/personas': () => json(PERSONAS),
     });
     render(<AdminApp />);

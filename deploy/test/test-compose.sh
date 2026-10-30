@@ -32,8 +32,7 @@ PRIMARY_PID=${PIDS[0]}
 
 step "Start stack (data in $WORK/data)"
 cp "$DEPLOY_DIR/docker-compose.yml" "$WORK/"
-mkdir -p "$WORK/content" "$WORK/data"/{db,people,photos,personas}
-echo '[]' > "$WORK/content/gates.json"
+mkdir -p "$WORK/data"/{db,people,photos,personas,gates}
 cat > "$WORK/.env" <<ENV
 IPSENGPT_TAG=$IMAGE_TAG
 APP_PORT=$APP_PORT
@@ -81,6 +80,9 @@ assert_contains "$session" "PRIMARY-REPLY" "chat history survives restart"
 [[ -f "$WORK/data/db/ipsengpt.sqlite" ]] && pass "database lives in the bind-mounted volume" || fail "no db file on host"
 diff -r "$REPO_ROOT/content/personas" "$WORK/data/personas" >/dev/null \
   && pass "the shipped personas were copied into the empty personas volume" || fail "personas not seeded: $(ls "$WORK/data/personas")"
+cmp -s "$REPO_ROOT/content/gates.json" "$WORK/data/gates/gates.json" \
+  && pass "the shipped gates were copied into the empty gates volume" || fail "gates not seeded: $(ls "$WORK/data/gates")"
+echo '[]' > "$WORK/data/gates/gates.json"
 # An edit made in admin (here: by hand, as the app's user would write it).
 printf -- '---\nname: Edited\n---\nYou are EditedGhost.\n' > "$WORK/data/personas/sadgpt.md"
 
@@ -90,9 +92,11 @@ wait_for 30 curl -sf "$BASE/api/health" || fail "app not healthy after recreate"
 assert_contains "$(curl -sf "$BASE/api/session" -H "authorization: Bearer $token")" '"name":"Kari"' "session survives recreate"
 
 grep -q EditedGhost "$WORK/data/personas/sadgpt.md" && pass "persona edits survive a recreate (not re-seeded)" || fail "persona edit was overwritten"
+[[ "$(cat "$WORK/data/gates/gates.json")" == '[]' ]] && pass "gate edits survive a recreate (not re-seeded)" || fail "gates were re-seeded"
 
-step "Content edits apply without restart"
-echo '[{"x":1}]' > "$WORK/content/gates.json"
-docker compose -p "$PROJECT" exec -T app cat /app/content/gates.json | grep -q '"x"' && pass "content mount is live" || fail "content not mounted"
+step "Gate edits apply without restart"
+echo '[{"id":"x","target":"a hat","guest_prompt":"Show me a hat!","trigger":{"type":"session_start"}}]' > "$WORK/data/gates/gates.json"
+assert_contains "$(curl -sf -X POST "$BASE/api/session" -H 'content-type: application/json' -d '{"name":"Per"}')" \
+  'Show me a hat!' "the app reads the gates volume live"
 
 printf '\n\033[32m%d checks passed\033[0m\n' "$PASS"

@@ -3,7 +3,7 @@ import type { Config } from './config.js';
 import { openDb, type Db } from './db.js';
 import { ErrorLog } from './errorLog.js';
 import { EventHub } from './events.js';
-import { loadGateDefs, type GateDefSet } from './gateDefs.js';
+import { GateDefStore, type GateDefSet } from './gateDefs.js';
 import { GateStore, gateView } from './gates.js';
 import { InviteStore } from './invites.js';
 import { Llm } from './llm.js';
@@ -29,6 +29,8 @@ export interface Services {
   gates: GateStore;
   /** Current gate definitions, read from disk. */
   gateDefs: () => GateDefSet;
+  /** Creates, edits and deletes gate definitions (admin). */
+  gateStore: GateDefStore;
   photos: PhotoStore;
   adminAuth: AdminAuth;
   limiter: RateLimiter;
@@ -72,12 +74,18 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
   const settings = new Settings(db);
   const errors = new ErrorLog(50, now);
   const sessions = new SessionStore(db, people, now);
-  const gateDefs = () => loadGateDefs(config.gatesPath, people);
+  const gateStore = new GateDefStore(config.gatesPath, people, config.gatesSeedPath);
+  const gateDefs = () => gateStore.load();
   const gates = new GateStore(db, gateDefs, now);
   const log = (msg: string, err?: unknown) => {
     write(msg, err);
     errors.add(msg, err);
   };
+  try {
+    if (gateStore.seed()) write(`Gates: copied the shipped gates into ${config.gatesPath}`);
+  } catch (err) {
+    log(`Could not copy the shipped gates into ${config.gatesPath}`, err);
+  }
   const personas = new PersonaStore(config.chat.personasDir, config.chat.defaultPersona, settings, config.chat.personasSeedDir);
   try {
     const copied = personas.seed();
@@ -133,6 +141,7 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     invites: new InviteStore(db, now),
     gates,
     gateDefs,
+    gateStore,
     photos: new PhotoStore(db, config.photos.dir, now),
     adminAuth: new AdminAuth(db, config.admin, now),
     limiter: new RateLimiter(now),

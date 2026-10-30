@@ -48,15 +48,19 @@ describe('docker-compose.yml', () => {
     }
   });
 
-  it('the image writes photos into the photos volume and reads gates from the mounted content', () => {
+  it('the image writes photos, personas and gates into data volumes, seeded from the shipped defaults', () => {
     const dockerfile = fs.readFileSync(path.join(DEPLOY, '../Dockerfile'), 'utf8');
     expect(dockerfile).toMatch(/PHOTOS_DIR=\/data\/photos\b/);
-    expect(dockerfile).toMatch(/GATES_PATH=\/app\/content\/gates\.json\b/);
-    // Personas are edited in admin: writable volume, seeded from defaults outside the read-only ./content mount.
+    // Personas and gates are edited in admin: writable volumes, seeded on first start.
     expect(dockerfile).toMatch(/PERSONAS_DIR=\/data\/personas\b/);
     expect(dockerfile).toMatch(/PERSONAS_SEED_DIR=\/app\/personas-default\b/);
     expect(dockerfile).toMatch(/COPY content\/personas \.\/personas-default/);
-    expect(compose.services.app?.volumes).toContain('./content:/app/content:ro');
+    expect(dockerfile).toMatch(/GATES_PATH=\/data\/gates\/gates\.json\b/);
+    expect(dockerfile).toMatch(/GATES_SEED_PATH=\/app\/gates-default\.json\b/);
+    expect(dockerfile).toMatch(/COPY content\/gates\.json \.\/gates-default\.json/);
+    const volumes = compose.services.app?.volumes ?? [];
+    expect(volumes).toContain('${DATA_ROOT:-/srv/ipsengpt}/gates:/data/gates');
+    expect(volumes.some((v: string) => v.includes('content'))).toBe(false);
   });
 
   it('runs only the app (the model lives on the PC), restarting it after a crash or reboot', () => {

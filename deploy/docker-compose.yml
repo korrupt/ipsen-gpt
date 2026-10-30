@@ -20,8 +20,8 @@ services:
       - ${DATA_ROOT:-/srv/ipsengpt}/photos:/data/photos
       # Edited in admin. Seeded from the image's defaults when empty.
       - ${DATA_ROOT:-/srv/ipsengpt}/personas:/data/personas
-      # gates.json is re-read on every use: edit it here, no restart needed.
-      - ./content:/app/content:ro
+      # Edited in admin. Seeded from the image's defaults when empty.
+      - ${DATA_ROOT:-/srv/ipsengpt}/gates:/data/gates
     restart: unless-stopped
     stop_grace_period: 5s
     logging:

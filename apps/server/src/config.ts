@@ -37,7 +37,11 @@ const ConfigSchema = z.object({
 
   DB_PATH: z.string().default('data/ipsengpt.sqlite'),
   PEOPLE_DIR: z.string().default('data/people'),
-  GATES_PATH: z.string().default('content/gates.json'),
+  GATES_PATH: z.string().default('data/gates.json'),
+  /** The shipped gates, copied to GATES_PATH on first start. */
+  GATES_SEED_PATH: z.string().default('content/gates.json'),
+  /** How sure the model must be that a text-gate answer does what was asked. */
+  TEXT_GATE_CONFIDENCE_MIN: z.coerce.number().min(0).max(1).default(0.7),
   PHOTOS_DIR: z.string().default('data/photos'),
 
   /** A photo passes only if the model says yes with at least this confidence. */
@@ -99,6 +103,10 @@ export interface Config {
   dbPath: string;
   peopleDir: string;
   gatesPath: string;
+  gatesSeedPath: string;
+  textGates: {
+    confidenceMin: number;
+  };
   photos: {
     dir: string;
     confidenceMin: number;
@@ -185,6 +193,10 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
     dbPath: e.DB_PATH === ':memory:' ? e.DB_PATH : resolve(e.DB_PATH),
     peopleDir: resolve(e.PEOPLE_DIR),
     gatesPath: resolve(e.GATES_PATH),
+    gatesSeedPath: resolve(e.GATES_SEED_PATH),
+    textGates: {
+      confidenceMin: e.TEXT_GATE_CONFIDENCE_MIN,
+    },
     photos: {
       dir: resolve(e.PHOTOS_DIR),
       confidenceMin: e.PHOTO_CONFIDENCE_MIN,

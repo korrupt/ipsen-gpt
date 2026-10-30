@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { DEFAULT_REFUSALS, gateView, type Gate } from '../gates.js';
+import { DEFAULT_REFUSALS, gateView, TEXT_FAILED_LINES, TEXT_VERDICT_LINES, type Gate } from '../gates.js';
 import { allow, clientIp, requireSession, sessionOf } from '../http.js';
 import { OllamaError, type ChatMessage } from '../ollama.js';
 import type { PeopleStore } from '../people.js';
@@ -18,6 +18,7 @@ import {
 import type { Session } from '../sessions.js';
 import type { Services } from '../services.js';
 import { openSse, type SseStream } from '../sse.js';
+import { judgeMessages, parseTextVerdict, TEXT_VERDICT_FORMAT, textPasses } from '../verify.js';
 
 export interface ChatRouteDeps {
   config: Config;
@@ -59,7 +60,7 @@ export function refusalSection(gate: Gate): string {
 
 export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps): Router {
   const router = Router();
-  const { sessions, people, limiter, inFlight, gates, llm, settings, secrets } = services;
+  const { sessions, people, limiter, inFlight, gates, llm, settings, secrets, points } = services;
   const historyLimit = config.chat.historyTurns * 2;
 
   const Body = z.object({
@@ -85,6 +86,56 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
         else reply = await generateRefusal(gate, sse, n, userMessage);
         if (gate.refusalLines.length > 0) sse.send('token', { text: reply });
         sessions.addExchange(session.id, userMessage, reply);
+        sse.send('done', {});
+      } finally {
+        inFlight.delete(session.id);
+        sse.close();
+      }
+    };
+
+    /**
+     * A text gate: the message is the guest's answer. The model judges it (a
+     * narrow JSON verdict, never the chat model's say-so); a confident yes passes the gate.
+     */
+    const replyTextGate = async (gate: Gate, userMessage: string) => {
+      inFlight.add(session.id);
+      const sse = openSse(res, config.sseHeartbeatMs);
+      try {
+        const n = gates.refused(gate.id);
+        let reply: string;
+        let passed = false;
+        let text: string | null = null;
+        try {
+          text = await llm.vision(judgeMessages(gate.target, userMessage), {
+            format: TEXT_VERDICT_FORMAT,
+            temperature: 0,
+            timeoutMs: config.photos.verifyTimeoutMs,
+          });
+        } catch (err) {
+          log('Text gate judging failed', err);
+        }
+        const verdict = text === null ? null : parseTextVerdict(text);
+        if (text !== null && !verdict) log(`Text gate verdict was not the expected JSON: ${text.slice(0, 300)}`);
+        if (!verdict) {
+          reply = TEXT_VERDICT_LINES.unverified;
+        } else if (textPasses(verdict, config.textGates.confidenceMin)) {
+          reply = TEXT_VERDICT_LINES.passed;
+          // The gate may have expired or been cancelled while the model thought.
+          if (gates.get(gate.id)?.status === 'active') {
+            gates.pass(gate.id);
+            passed = true;
+            if (gate.points !== 0) points.award(gate.sessionId, gate.points, `Challenge: ${gate.target}`, 'gate', gate.id);
+          }
+        } else {
+          const lines = gate.refusalLines.length > 0 ? gate.refusalLines : TEXT_FAILED_LINES;
+          reply = `${lines[n % lines.length]!}${verdict.reason ? `\n\n${verdict.reason}` : ''}`;
+        }
+        sse.send('token', { text: reply });
+        sessions.addExchange(session.id, userMessage, reply);
+        if (passed) {
+          const next = gates.current(session.id);
+          sse.send('gate', next ? gateView(next) : null);
+        }
         sse.send('done', {});
       } finally {
         inFlight.delete(session.id);
@@ -158,10 +209,12 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
     if (!allow(limiter, res, `chat:session:${session.id}`, config.rateLimits.chatPerSession)) return;
 
     const userMessage = parsed.data.message;
-    // Gates are decided here, in code. The model is never asked whether to unlock.
+    // Gates are decided here, in code. The chat model is never asked whether to unlock;
+    // a text gate's answer goes to a separate, narrow judge.
     const gate = gates.current(session.id);
     if (gate) {
-      await replyGated(gate, userMessage);
+      if (gate.kind === 'text') await replyTextGate(gate, userMessage);
+      else await replyGated(gate, userMessage);
       return;
     }
 

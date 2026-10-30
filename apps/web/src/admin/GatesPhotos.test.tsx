@@ -15,6 +15,7 @@ const loggedIn = (routes: Parameters<typeof fakeServer>[0] = {}) =>
     'GET /api/admin/me': () => json({ ok: true }),
     'GET /api/admin/claims': () => json({ claims: [] }),
     'GET /api/admin/sessions': () => json({ sessions: [] }),
+    'GET /api/admin/people': () => json({ people: [], errors: [] }),
     ...routes,
   });
 
@@ -22,6 +23,7 @@ const def = (over: Partial<GateDefinition> = {}): GateDefinition => ({
   key: 'global/pumpkin',
   id: 'pumpkin',
   person: null,
+  kind: 'photo',
   target: 'a pumpkin',
   guestPrompt: 'Bring me a pumpkin!',
   refusalLines: [],
@@ -36,6 +38,7 @@ const gate = (over: Partial<AdminGate> = {}): AdminGate => ({
   sessionName: 'Kari',
   defKey: 'global/pumpkin',
   source: 'admin_forced',
+  kind: 'photo',
   target: 'a pumpkin',
   guestPrompt: 'Bring me a pumpkin!',
   points: 10,
@@ -92,6 +95,7 @@ describe('gates tab', () => {
           definitions: [def(), def({ key: 'ola/carrot', target: 'a carrot', person: { slug: 'ola', name: 'Ola' }, trigger: { type: 'after_messages', count: 3 } })],
           errors: ['gates.json gate Bad: id: lowercase letters, digits and dashes'],
           active,
+          missingShipped: [],
         }),
       'POST /api/admin/gates/g1/cancel': () => {
         active = [];
@@ -101,8 +105,8 @@ describe('gates tab', () => {
     render(<AdminApp />);
     await userEvent.click(await screen.findByRole('button', { name: /^gates$/i }));
 
-    expect(await screen.findByText('Ola only · after 3 messages')).toBeTruthy();
-    expect(screen.getByText('only when forced')).toBeTruthy();
+    expect(await screen.findByText('Photo · Ola only · after 3 messages')).toBeTruthy();
+    expect(screen.getByText('Photo · everyone · only when forced')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('gates.json gate Bad');
     const card = screen.getByTestId('gate-card');
     expect(within(card).getByText('Kari')).toBeTruthy();
@@ -116,7 +120,7 @@ describe('gates tab', () => {
   it('forces a defined gate on everyone, only after confirming', async () => {
     const fetch = loggedIn({
       'GET /api/admin/sessions': () => json({ sessions: [kari] }),
-      'GET /api/admin/gates': () => json({ definitions: [def()], errors: [], active: [] }),
+      'GET /api/admin/gates': () => json({ definitions: [def()], errors: [], active: [], missingShipped: [] }),
       'POST /api/admin/gates/force': () => json({ count: 7 }),
     });
     const confirm = vi.spyOn(window, 'confirm');
@@ -139,7 +143,7 @@ describe('gates tab', () => {
   it('forces a custom gate on one guest with a deadline', async () => {
     const fetch = loggedIn({
       'GET /api/admin/sessions': () => json({ sessions: [kari] }),
-      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [] }),
+      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [], missingShipped: [] }),
       'POST /api/admin/gates/force': () => json({ count: 1 }),
     });
     render(<AdminApp />);
@@ -157,7 +161,7 @@ describe('gates tab', () => {
     expect((await screen.findByRole('status')).textContent).toBe('Gate forced');
     expect(bodyOf(fetch, '/api/admin/gates/force')).toEqual({
       sessionId: 's1',
-      custom: { target: 'a broomstick', guestPrompt: 'Broom or bust.' },
+      custom: { kind: 'photo', target: 'a broomstick', guestPrompt: 'Broom or bust.' },
       deadlineMinutes: 10,
     });
   });
@@ -215,7 +219,7 @@ describe('session detail', () => {
       'GET /api/admin/sessions/s1': () =>
         json({ session: kari, messages: [], gates: [gate({ status: 'passed' })], photos: [photo()] }),
       'GET /api/admin/people': () => json({ people: [], errors: [] }),
-      'GET /api/admin/gates': () => json({ definitions: [def()], errors: [], active: [] }),
+      'GET /api/admin/gates': () => json({ definitions: [def()], errors: [], active: [], missingShipped: [] }),
       'POST /api/admin/gates/force': () => json({ count: 1 }),
     });
     render(<AdminApp />);
@@ -231,5 +235,110 @@ describe('session detail', () => {
     await userEvent.selectOptions(within(form).getByLabelText('Gate'), 'a pumpkin');
     await userEvent.click(within(form).getByRole('button', { name: 'Force gate' }));
     await waitFor(() => expect(bodyOf(fetch, '/api/admin/gates/force')).toEqual({ sessionId: 's1', key: 'global/pumpkin' }));
+  });
+});
+
+describe('gate editor', () => {
+  it('creates a text gate for one person, with an id made from the target', async () => {
+    let defs: GateDefinition[] = [];
+    const fetch = loggedIn({
+      'GET /api/admin/gates': () => json({ definitions: defs, errors: [], active: [], missingShipped: [] }),
+      'GET /api/admin/people': () => json({ people: [{ slug: 'ola', name: 'Ola' }], errors: [] }),
+      'POST /api/admin/gate-defs': (init) => {
+        const b = JSON.parse(init.body as string);
+        defs = [def({ key: `${b.for}/${b.id}`, id: b.id, kind: b.kind, target: b.target, person: { slug: 'ola', name: 'Ola' } })];
+        return json({ definition: defs[0] });
+      },
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^gates$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: 'New gate' }));
+    const form = screen.getByRole('form', { name: 'New gate' });
+    const create = within(form).getByRole('button', { name: 'Create gate' });
+    expect(create).toHaveProperty('disabled', true);
+
+    await userEvent.selectOptions(within(form).getByLabelText('Kind'), 'text');
+    await userEvent.type(within(form).getByLabelText('What their message must do'), 'A haiku about Pumpkins!');
+    await userEvent.type(within(form).getByLabelText(/what sadgpt says/i), 'Write me a haiku.');
+    await userEvent.type(within(form).getByLabelText(/aren’t good enough/), 'No.{Enter}{Enter}Try harder.');
+    await waitFor(() => expect(within(form).getByRole('option', { name: 'Ola only' })).toBeTruthy());
+    await userEvent.selectOptions(within(form).getByLabelText('For'), 'Ola only');
+    await userEvent.selectOptions(within(form).getByLabelText('When'), 'after_messages');
+    const count = within(form).getByLabelText('After how many messages');
+    await userEvent.clear(count);
+    await userEvent.type(count, '3');
+    expect((within(form).getByLabelText(/^id/i) as HTMLInputElement).value).toBe('a-haiku-about-pumpkins');
+
+    await userEvent.click(create);
+    expect(bodyOf(fetch, '/api/admin/gate-defs')).toEqual({
+      id: 'a-haiku-about-pumpkins',
+      for: 'ola',
+      kind: 'text',
+      target: 'A haiku about Pumpkins!',
+      guestPrompt: 'Write me a haiku.',
+      refusalLines: ['No.', 'Try harder.'],
+      points: 5,
+      trigger: { type: 'after_messages', count: 3 },
+    });
+    expect((await screen.findByTestId('gate-definition')).textContent).toContain('✍️ A haiku about Pumpkins!');
+    expect(screen.queryByRole('form', { name: 'New gate' })).toBeNull();
+  });
+
+  it('edits, resets, deletes and adds back gates, and shows server errors', async () => {
+    let defs = [def({ shipped: 'changed' }), def({ key: 'global/candle', id: 'candle', target: 'a candle', shipped: 'same' })];
+    let missing: GateDefinition[] = [];
+    const fetch = loggedIn({
+      'GET /api/admin/gates': () => json({ definitions: defs, errors: [], active: [], missingShipped: missing }),
+      'PUT /api/admin/gate-defs/global/pumpkin': (init) => {
+        const b = JSON.parse(init.body as string);
+        if (b.points > 100) return json({ error: 'points: too many' }, 400);
+        defs = [{ ...defs[0]!, target: b.target, points: b.points }, defs[1]!];
+        return json({ definition: defs[0] });
+      },
+      'POST /api/admin/gate-defs/restore/pumpkin': () => {
+        defs = [{ ...defs[0]!, target: 'a pumpkin', shipped: 'same' }, defs[1]!];
+        return json({ definition: defs[0] });
+      },
+      'DELETE /api/admin/gate-defs/global/candle': () => {
+        missing = [defs[1]!];
+        defs = [defs[0]!];
+        return json({ ok: true });
+      },
+      'POST /api/admin/gate-defs/restore/candle': () => {
+        defs = [...defs, missing[0]!];
+        missing = [];
+        return json({ definition: defs[1] });
+      },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^gates$/i }));
+    const [pumpkin] = await screen.findAllByTestId('gate-definition');
+    expect(pumpkin!.textContent).toContain('edited');
+
+    await userEvent.click(within(pumpkin!).getByRole('button', { name: 'Edit' }));
+    const form = screen.getByRole('form', { name: 'Edit gate pumpkin' });
+    expect(within(form).queryByLabelText(/^id/i)).toBeNull();
+    const target = within(form).getByLabelText('What must be in the photo');
+    await userEvent.clear(target);
+    await userEvent.type(target, 'a giant pumpkin');
+    const pts = within(form).getByLabelText('Points');
+    await userEvent.clear(pts);
+    await userEvent.type(pts, '500');
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }));
+    expect((await within(form).findByRole('alert')).textContent).toBe('points: too many');
+    await userEvent.clear(pts);
+    await userEvent.type(pts, '12');
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('📷 a giant pumpkin')).toBeTruthy();
+    expect(bodyOf(fetch, '/api/admin/gate-defs/global/pumpkin')).toMatchObject({ for: null, kind: 'photo', points: 500 });
+
+    await userEvent.click(within(screen.getAllByTestId('gate-definition')[0]!).getByRole('button', { name: 'Reset to shipped' }));
+    expect(await screen.findByText('📷 a pumpkin')).toBeTruthy();
+
+    await userEvent.click(within(screen.getAllByTestId('gate-definition')[1]!).getByRole('button', { name: 'Delete' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Add back' }));
+    await waitFor(() => expect(screen.getAllByTestId('gate-definition')).toHaveLength(2));
+    expect(screen.queryByRole('button', { name: 'Add back' })).toBeNull();
   });
 });

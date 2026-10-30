@@ -22,6 +22,7 @@ describe('gate definitions', () => {
         key: 'global/pumpkin',
         id: 'pumpkin',
         personSlug: null,
+        kind: 'photo',
         target: 'a pumpkin',
         guestPrompt: 'Show me a pumpkin!',
         refusalLines: ['No.'],

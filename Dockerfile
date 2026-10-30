@@ -26,13 +26,15 @@ ENV NODE_ENV=production \
     PERSONAS_SEED_DIR=/app/personas-default \
     DB_PATH=/data/db/ipsengpt.sqlite \
     PEOPLE_DIR=/data/people \
-    GATES_PATH=/app/content/gates.json \
+    GATES_PATH=/data/gates/gates.json \
+    GATES_SEED_PATH=/app/gates-default.json \
     PHOTOS_DIR=/data/photos
 WORKDIR /app
 COPY --from=build /out ./server
 COPY --from=build /src/apps/web/dist ./web
-# Default gates; production mounts ./content over them so edits need no rebuild.
-COPY content/gates.json ./content/
+# The shipped gates: copied into /data/gates on first start (gates are edited in admin
+# and live with the party data) and restorable from admin, like the personas below.
+COPY content/gates.json ./gates-default.json
 # The shipped personas, outside the ./content mount: copied into /data/personas on first start
 # (personas are edited in admin and live with the party data) and restorable from admin.
 COPY content/personas ./personas-default

@@ -164,10 +164,27 @@ export type GateTrigger =
   | { type: 'admin_forced' }
   | { type: 'timed_global'; at: string; deadline_minutes: number };
 
+export type GateKind = 'photo' | 'text';
+
 export interface GateDefinition {
   key: string;
   id: string;
   person: { slug: string; name: string } | null;
+  /** photo: send a photo of `target`. text: write a chat message that does `target`; the model judges it. */
+  kind: GateKind;
+  target: string;
+  guestPrompt: string;
+  refusalLines: string[];
+  points: number;
+  trigger: GateTrigger;
+  /** For gates for everyone: same as shipped, edited, or not a shipped gate (null). */
+  shipped?: 'same' | 'changed' | null;
+}
+
+/** A gate as the editor sends it; `for`: a person's slug, or null for everyone. */
+export interface GateDefInput {
+  for: string | null;
+  kind: GateKind;
   target: string;
   guestPrompt: string;
   refusalLines: string[];
@@ -182,7 +199,8 @@ export interface AdminGate {
   sessionId: string;
   sessionName: string | null;
   defKey: string | null;
-  source: 'session_start' | 'after_messages' | 'admin_forced' | 'timed_global';
+  source: 'session_start' | 'after_messages' | 'secret_level' | 'admin_forced' | 'timed_global';
+  kind: GateKind;
   target: string;
   guestPrompt: string;
   points: number;
@@ -220,7 +238,7 @@ export interface ForceGateInput {
   sessionId?: string;
   all?: true;
   key?: string;
-  custom?: { target: string; guestPrompt: string };
+  custom?: { kind: GateKind; target: string; guestPrompt: string };
   deadlineMinutes?: number;
 }
 
@@ -304,7 +322,15 @@ export const adminApi = {
   pause: (reason: string) => call<{ pauseReason: string; status: ChatStatus }>('PUT', '/system/pause', { reason }),
   resume: () => call<{ pauseReason: null; status: ChatStatus }>('DELETE', '/system/pause'),
 
-  gates: () => call<{ definitions: GateDefinition[]; errors: string[]; active: AdminGate[] }>('GET', '/gates'),
+  gates: () =>
+    call<{ definitions: GateDefinition[]; missingShipped: GateDefinition[]; errors: string[]; active: AdminGate[] }>('GET', '/gates'),
+  createGateDef: (id: string, input: GateDefInput) =>
+    call<{ definition: GateDefinition }>('POST', '/gate-defs', { id, ...input }).then((r) => r.definition),
+  /** `key` is "global/<id>" or "<slug>/<id>". */
+  updateGateDef: (key: string, input: GateDefInput) =>
+    call<{ definition: GateDefinition }>('PUT', `/gate-defs/${key}`, input).then((r) => r.definition),
+  deleteGateDef: (key: string) => call<{ ok: true }>('DELETE', `/gate-defs/${key}`),
+  restoreGateDef: (id: string) => call<{ definition: GateDefinition }>('POST', `/gate-defs/restore/${id}`, {}).then((r) => r.definition),
   forceGate: (input: ForceGateInput) => call<{ count: number }>('POST', '/gates/force', input),
   cancelGate: (id: string) => call<{ gate: AdminGate }>('POST', `/gates/${id}/cancel`, {}),
 

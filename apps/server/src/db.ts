@@ -186,6 +186,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE points_new RENAME TO points;
   CREATE INDEX points_session ON points (session_id, created_at);
   `,
+  `
+  -- Text gates: the guest writes something in the chat and the model judges it.
+  ALTER TABLE gates ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo' CHECK (kind IN ('photo', 'text'));
+  `,
 ];
 
 export function openDb(dbPath: string): Db {

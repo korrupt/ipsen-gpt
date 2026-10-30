@@ -7,7 +7,9 @@ import {
   type AdminGate,
   type AdminSession,
   type GateDefinition,
+  type GateKind,
 } from './api';
+import { GateEditor } from './GateEditor';
 import { usePoll } from './usePoll';
 
 interface Props {
@@ -42,6 +44,7 @@ export function ForceGateForm({
 }) {
   const [who, setWho] = useState(sessionId ?? '');
   const [key, setKey] = useState('');
+  const [kind, setKind] = useState<GateKind>('photo');
   const [target, setTarget] = useState('');
   const [guestPrompt, setGuestPrompt] = useState('');
   const [minutes, setMinutes] = useState('');
@@ -54,13 +57,13 @@ export function ForceGateForm({
     e.preventDefault();
     if (!ready || busy) return;
     const everyone = who === EVERYONE;
-    if (everyone && !window.confirm('Force this gate on everyone? Their chat stops until they send a photo.')) return;
+    if (everyone && !window.confirm('Force this gate on everyone? Their chat stops until they pass it.')) return;
     setBusy(true);
     try {
       const deadlineMinutes = Number(minutes) > 0 ? Number(minutes) : undefined;
       const r = await adminApi.forceGate({
         ...(everyone ? { all: true } : { sessionId: who }),
-        ...(custom ? { custom: { target: target.trim(), guestPrompt: guestPrompt.trim() } } : { key }),
+        ...(custom ? { custom: { kind, target: target.trim(), guestPrompt: guestPrompt.trim() } } : { key }),
         deadlineMinutes,
       });
       toast(r.count === 1 ? 'Gate forced' : `Gate forced on ${r.count} guests`);
@@ -109,6 +112,7 @@ export function ForceGateForm({
         {definitions.map((d) => (
           <option key={d.key} value={d.key}>
             {d.person ? `${d.person.name}: ` : ''}
+            {d.kind === 'text' ? '✍️ ' : ''}
             {d.target}
           </option>
         ))}
@@ -116,16 +120,20 @@ export function ForceGateForm({
       </select>
       {custom && (
         <>
+          <select className="admin-input" aria-label="Custom gate kind" value={kind} onChange={(e) => setKind(e.target.value as GateKind)}>
+            <option value="photo">Photo</option>
+            <option value="text">Text (the AI judges their message)</option>
+          </select>
           <input
             className="admin-input"
-            placeholder="What must be in the photo, e.g. a broomstick"
+            placeholder={kind === 'photo' ? 'What must be in the photo, e.g. a broomstick' : 'What their message must do, e.g. a compliment for SadGPT'}
             aria-label="Custom gate target"
-            maxLength={200}
+            maxLength={300}
             value={target}
             onChange={(e) => setTarget(e.target.value)}
           />
           <textarea
-            className="admin-input admin-textarea"
+            className="admin-input admin-textarea admin-textarea--short"
             placeholder="What SadGPT says, e.g. Show me a broomstick. It's the only thing that could cheer me up."
             aria-label="What SadGPT demands"
             maxLength={1000}
@@ -178,9 +186,79 @@ export function GateCard({ gate, onCancel, showName = true }: { gate: AdminGate;
   );
 }
 
+/** A gate definition in the list, with its actions. */
+function DefinitionCard({
+  d,
+  onEdit,
+  onChanged,
+  toast,
+}: {
+  d: GateDefinition;
+  onEdit: () => void;
+  onChanged: () => void;
+  toast: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>, done: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      toast(done);
+      onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card" data-testid="gate-definition">
+      <div className="card__row">
+        <strong>
+          {d.kind === 'text' ? '✍️ ' : '📷 '}
+          {d.target}
+        </strong>
+        <span className="admin-muted">{d.points} pts</span>
+      </div>
+      <div className="admin-muted">
+        {d.kind === 'text' ? 'Text' : 'Photo'} · {d.person ? `${d.person.name} only` : 'everyone'} · {triggerLabel(d.trigger)}
+        {d.shipped === 'changed' ? ' · edited' : ''}
+      </div>
+      <div className="force-gate__prompt">“{d.guestPrompt}”</div>
+      <div className="card__actions">
+        <button className="btn btn--small" disabled={busy} onClick={onEdit}>
+          Edit
+        </button>
+        {d.shipped === 'changed' && (
+          <button
+            className="btn btn--small"
+            disabled={busy}
+            onClick={() => window.confirm(`Undo your edits to "${d.id}"?`) && void run(() => adminApi.restoreGateDef(d.id), 'Gate reset')}
+          >
+            Reset to shipped
+          </button>
+        )}
+        <button
+          className="btn btn--small btn--danger"
+          disabled={busy}
+          onClick={() =>
+            window.confirm(`Delete the gate "${d.id}"? Guests facing it now keep it.`) &&
+            void run(() => adminApi.deleteGateDef(d.key), 'Gate deleted')
+          }
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function GatesTab({ toast }: Props) {
   const { data, reload, error } = usePoll(adminApi.gates, 5000);
   const { data: sessions } = usePoll(adminApi.sessions, 10000);
+  const { data: people } = usePoll(adminApi.people, 30000);
+  /** The definition being edited (its key), 'new', or null. */
+  const [editing, setEditing] = useState<string | null>(null);
 
   if (!data) return <p className="admin-muted admin-tab">{error ?? 'Loading…'}</p>;
 
@@ -193,6 +271,22 @@ export function GatesTab({ toast }: Props) {
       toast(err instanceof Error ? err.message : 'Failed');
     }
   };
+  const saved = () => {
+    setEditing(null);
+    void reload();
+  };
+  const restore = async (id: string) => {
+    try {
+      await adminApi.restoreGateDef(id);
+      toast('Gate added back');
+      await reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed');
+    }
+  };
+  const editor = (gate: GateDefinition | null) => (
+    <GateEditor gate={gate} people={people?.people ?? []} toast={toast} onSaved={saved} onCancel={() => setEditing(null)} />
+  );
 
   return (
     <section className="admin-tab">
@@ -209,7 +303,7 @@ export function GatesTab({ toast }: Props) {
         ))}
       </ul>
 
-      <h3 className="admin-h3">Defined in gates.json ({data.definitions.length})</h3>
+      <h3 className="admin-h3">Gates ({data.definitions.length})</h3>
       {data.errors.length > 0 && (
         <div className="card" role="alert">
           {data.errors.map((e) => (
@@ -219,21 +313,42 @@ export function GatesTab({ toast }: Props) {
           ))}
         </div>
       )}
+      {editing === 'new' ? (
+        editor(null)
+      ) : (
+        <button className="btn btn--primary gates__new" onClick={() => setEditing('new')}>
+          New gate
+        </button>
+      )}
       <ul className="admin-list">
         {data.definitions.map((d) => (
-          <li key={d.key} className="card">
-            <div className="card__row">
-              <strong>{d.target}</strong>
-              <span className="admin-muted">{d.points} pts</span>
-            </div>
-            <div className="admin-muted">
-              {d.person ? `${d.person.name} only · ` : ''}
-              {triggerLabel(d.trigger)}
-            </div>
-            <div className="force-gate__prompt">“{d.guestPrompt}”</div>
+          <li key={d.key}>
+            {editing === d.key ? (
+              editor(d)
+            ) : (
+              <DefinitionCard d={d} onEdit={() => setEditing(d.key)} onChanged={() => void reload()} toast={toast} />
+            )}
           </li>
         ))}
       </ul>
+      {data.missingShipped.length > 0 && (
+        <>
+          <h3 className="admin-h3">Deleted shipped gates</h3>
+          <ul className="admin-list">
+            {data.missingShipped.map((d) => (
+              <li key={d.id} className="card card__row">
+                <span>
+                  {d.kind === 'text' ? '✍️ ' : '📷 '}
+                  {d.target}
+                </span>
+                <button className="btn btn--small" onClick={() => void restore(d.id)}>
+                  Add back
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }

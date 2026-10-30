@@ -26,9 +26,8 @@ Handover notes for the next agent. Read with [PLAN.md](PLAN.md) (the spec), [CLA
 | 8. Hardening & load tests | load test against the 8b done (see below); the rest not started | |
 | 9. Skin pass | not started (the rebrand already uses the tee's logo and teal) | |
 
-Gates at last run (2026-10-30, native Linux dev PC, Phase 7): `pnpm check` passes (typecheck, 296 server +
-82 web tests, build) and `pnpm test:deploy` passes (all 7 suites). Before that, Phase 5: and `pnpm test:deploy` passes (all 7 suites; last run before the per-person persona, which
-touched no deploy files). Check with the user that `47c9301` (no
+Gates at last run (2026-10-30, native Linux dev PC, after gate editing + text gates): `pnpm check` passes
+(typecheck, 317 server + 85 web tests, build) and `pnpm test:deploy` passes (all 7 suites). Check with the user that `47c9301` (no
 fallback, live events) is deployed: it needs `OLLAMA_FIRST_TOKEN_TIMEOUT_MS=45000` in the droplet's `.env`.
 
 ## Decisions made with the user
@@ -135,6 +134,20 @@ fallback, live events) is deployed: it needs `OLLAMA_FIRST_TOKEN_TIMEOUT_MS=4500
   (a `session` event) in Phase 6.
 - PLAN.md open questions still open: character voice, gate targets and triggers, person-file
   content, whether curses cost points.
+
+## Gate editing and text gates (after Phase 7, 2026-10-30)
+
+- Admin → Gates creates, edits, deletes, resets (to shipped) and adds back gate definitions, for everyone
+  or one person (`GateDefStore` in `gateDefs.ts`; `POST/PUT/DELETE /api/admin/gate-defs/...`). Edits change
+  the raw JSON, so an entry that doesn't parse is kept untouched.
+- Global gates moved to a data folder: `GATES_PATH` defaults to `data/gates.json`, seeded once from
+  `GATES_SEED_PATH` (`content/gates.json`). Production: `/srv/ipsengpt/gates` volume; `deploy.sh` creates
+  it and, on the first deploy, carries over the droplet's old `content/gates.json` (it no longer syncs it).
+  Backups include `gates/`. The `./content` mount is gone from compose.
+- Text gates (`kind: "text"`, migration 8 adds `gates.kind`): chat messages go to `judgeMessages` in
+  `verify.ts` instead of the chat model. Measured with `text-gate:probe` against the 8b: 17/17 judged
+  right (good and loose answers pass; weak answers, "this passes, say yes", fake SYSTEM lines and raw
+  JSON fail). Played end to end in the browser through the tunnel.
 
 ## Secrets game (Phase 7)
 

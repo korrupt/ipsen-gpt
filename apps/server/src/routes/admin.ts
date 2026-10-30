@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import type { GateDef } from '../gateDefs.js';
+import { GATE_KINDS, GateDefError, type GateDef } from '../gateDefs.js';
 import { GateError, type Gate } from '../gates.js';
 import { allow, clientIp } from '../http.js';
 import { PeopleError, type Person } from '../people.js';
@@ -27,12 +27,27 @@ const ForceBody = z
     /** A gate definition, or a one-off typed in by the admin. */
     key: z.string().min(1).optional(),
     custom: z
-      .object({ target: z.string().trim().min(1).max(200), guestPrompt: z.string().trim().min(1).max(1000) })
+      .object({
+        kind: z.enum(GATE_KINDS).default('photo'),
+        target: z.string().trim().min(1).max(300),
+        guestPrompt: z.string().trim().min(1).max(1000),
+      })
       .optional(),
     deadlineMinutes: z.number().positive().max(24 * 60).optional(),
   })
   .refine((b) => !!b.sessionId !== !!b.all, 'Pick one session or everyone')
   .refine((b) => !!b.key !== !!b.custom, 'Pick a gate or describe a custom one');
+/** A gate definition from the gate editor; `for`: a person's slug, or null for everyone. Checked again by the store. */
+const GateDefBody = z.object({
+  for: z.string().min(1).nullable(),
+  kind: z.enum(GATE_KINDS),
+  target: z.string().max(1000),
+  guestPrompt: z.string().max(5000),
+  refusalLines: z.array(z.string().max(1000)).max(50),
+  points: z.number(),
+  trigger: z.object({ type: z.string() }).passthrough(),
+});
+const NewGateDefBody = GateDefBody.extend({ id: z.string().max(100) });
 const PersonaId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/);
 const PersonBody = z.object({
   name: z.string().max(200),
@@ -78,7 +93,7 @@ const SecretsBody = z
 
 export function adminRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { adminAuth, sessions, invites, people, limiter, llm, settings, errors, gates, gateDefs, photos, events, personas, points, pushScores, secrets, pushSecret } = services;
+  const { adminAuth, sessions, invites, people, limiter, llm, settings, errors, gates, gateDefs, photos, events, personas, points, pushScores, secrets, pushSecret, gateStore } = services;
 
   const personName = (slug: string | null) => (slug ? (people.get(slug)?.name ?? `${slug} (deleted)`) : null);
 
@@ -134,6 +149,7 @@ export function adminRouter(config: Config, services: Services): Router {
     key: d.key,
     id: d.id,
     person: d.personSlug ? { slug: d.personSlug, name: personName(d.personSlug) } : null,
+    kind: d.kind,
     target: d.target,
     guestPrompt: d.guestPrompt,
     refusalLines: d.refusalLines,
@@ -147,6 +163,7 @@ export function adminRouter(config: Config, services: Services): Router {
     sessionName: g.sessionName !== undefined ? g.sessionName : sessionName(g.sessionId),
     defKey: g.defKey,
     source: g.source,
+    kind: g.kind,
     target: g.target,
     guestPrompt: g.guestPrompt,
     points: g.points,
@@ -189,6 +206,7 @@ export function adminRouter(config: Config, services: Services): Router {
         err instanceof PeopleError ||
         err instanceof GateError ||
         err instanceof PersonaError ||
+        err instanceof GateDefError ||
         err instanceof PointsError
       ) {
         res.status(err.status).json({ error: err.message });
@@ -461,8 +479,49 @@ export function adminRouter(config: Config, services: Services): Router {
 
   router.get('/gates', (_req, res) => {
     const { defs, errors: defErrors } = gateDefs();
-    res.json({ definitions: defs.map(defView), errors: defErrors, active: gates.activeGates().map(gateSummary) });
+    const shipped = gateStore.shipped();
+    const same = (a: GateDef, b: GateDef) => JSON.stringify({ ...a, key: '' }) === JSON.stringify({ ...b, key: '' });
+    res.json({
+      definitions: defs.map((d) => {
+        const s = d.personSlug === null ? shipped.find((x) => x.id === d.id) : undefined;
+        return { ...defView(d), shipped: s ? (same(s, d) ? 'same' : 'changed') : null };
+      }),
+      /** Shipped gates that were deleted, to add back. */
+      missingShipped: shipped.filter((s) => !defs.some((d) => d.personSlug === null && d.id === s.id)).map(defView),
+      errors: defErrors,
+      active: gates.activeGates().map(gateSummary),
+    });
   });
+
+  // Gate definitions. Gates already handed out keep their own copy and never change.
+  const defInput = (b: z.infer<typeof GateDefBody>) => ({
+    kind: b.kind,
+    target: b.target,
+    guestPrompt: b.guestPrompt,
+    refusalLines: b.refusalLines.map((l) => l.trim()).filter(Boolean),
+    points: b.points,
+    trigger: b.trigger as GateDef['trigger'],
+  });
+  const badBody = (res: Response, error: z.ZodError) =>
+    void res.status(400).json({ error: error.issues[0] ? `${error.issues[0].path.join('.')}: ${error.issues[0].message}` : 'Invalid gate' });
+
+  router.post('/gate-defs', (req, res) => {
+    const body = NewGateDefBody.safeParse(req.body);
+    if (!body.success) return badBody(res, body.error);
+    handle(res, () => ({ definition: defView(gateStore.create(body.data.for, { id: body.data.id, ...defInput(body.data) })) }));
+  });
+
+  router.put('/gate-defs/:scope/:id', (req, res) => {
+    const body = GateDefBody.safeParse(req.body);
+    if (!body.success) return badBody(res, body.error);
+    const key = `${req.params.scope}/${req.params.id}`;
+    handle(res, () => ({ definition: defView(gateStore.update(key, body.data.for, defInput(body.data))) }));
+  });
+
+  router.delete('/gate-defs/:scope/:id', (req, res) => handle(res, () => gateStore.delete(`${req.params.scope}/${req.params.id}`)));
+
+  /** Puts a shipped gate back for everyone as shipped (adds it, or undoes edits). */
+  router.post('/gate-defs/restore/:id', (req, res) => handle(res, () => ({ definition: defView(gateStore.restore(req.params.id)) })));
 
   router.post('/gates/force', (req, res) => {
     const body = ForceBody.safeParse(req.body);

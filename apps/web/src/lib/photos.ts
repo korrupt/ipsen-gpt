@@ -2,6 +2,8 @@ import { ApiError, authHeaders, checkResponse, NETWORK_ERROR } from './session';
 
 export interface GateView {
   id: string;
+  /** photo: send a photo. text: write the answer in the chat; the server judges each message. */
+  kind: 'photo' | 'text';
   /** What SadGPT demands, in character. */
   prompt: string;
   /** When the gate expires (ms since epoch), or null. */

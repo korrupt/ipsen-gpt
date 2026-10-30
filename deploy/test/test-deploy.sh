@@ -46,6 +46,10 @@ OLLAMA_MODEL=mock
 ADMIN_PASSWORD=deploy-test-pw
 ENV
 
+# A droplet from before gates moved to the data folder, with a hand-edited gate.
+echo '[{"id":"old","target":"an old hat","guest_prompt":"Hat!","trigger":{"type":"admin_forced"}}]' > "$WORK/app/content/gates.json"
+cp "$WORK/app/content/gates.json" "$WORK/app/content/old-gates.json"
+
 step "deploy.sh to a fake droplet"
 deploy() { PATH="$WORK/bin:$PATH" REMOTE_DIR="$WORK/app" DEPLOY_CONFIG=/nonexistent "$DEPLOY_DIR/deploy.sh" fake-droplet --skip-checks; }
 out=$(deploy 2>&1) || fail "deploy failed: $out"
@@ -55,7 +59,7 @@ assert_contains "$tag" "$(git -C "$REPO_ROOT" rev-parse --short HEAD)" "IPSENGPT
 assert_contains "$out" "previous: previous-tag" "reports the previous tag for rollback"
 cmp -s "$DEPLOY_DIR/docker-compose.yml" "$WORK/app/docker-compose.yml" && pass "compose file synced" || fail "compose not synced"
 [[ ! -e "$WORK/app/content/personas" ]] && pass "personas are not synced (they're edited in admin)" || fail "deploy.sh still syncs personas"
-cmp -s "$REPO_ROOT/content/gates.json" "$WORK/app/content/gates.json" && pass "gates synced" || fail "gates not synced"
+cmp -s "$WORK/app/content/old-gates.json" "$WORK/app/content/gates.json" && pass "gates are not synced (they're edited in admin)" || fail "deploy.sh still syncs gates"
 docker image inspect "ipsengpt:$tag" >/dev/null && pass "image loaded via docker save | ssh docker load"
 
 BASE="http://127.0.0.1:$APP_PORT"
@@ -66,12 +70,17 @@ assert_contains "$(curl -sN -X POST "$BASE/api/chat" -H "authorization: Bearer $
 
 [[ "$(stat -c %u:%a "$WORK/data/personas")" == 1000:750 ]] && pass "deploy.sh creates the personas folder for the app's user" || fail "personas folder: $(stat -c %u:%a "$WORK/data/personas")"
 [[ -f "$WORK/data/personas/sadgpt.md" ]] && pass "the shipped personas are copied into the data folder" || fail "personas not seeded"
+[[ "$(stat -c %u:%a "$WORK/data/gates")" == 1000:750 ]] && pass "deploy.sh creates the gates folder for the app's user" || fail "gates folder: $(stat -c %u:%a "$WORK/data/gates")"
+cmp -s "$WORK/app/content/old-gates.json" "$WORK/data/gates/gates.json" \
+  && pass "the droplet's old content/gates.json is carried over, not the shipped one" || fail "old gates not carried over: $(head -c 200 "$WORK/data/gates/gates.json")"
 
 step "Redeploy keeps data"
 printf -- '---\nname: Edited\n---\nYou are EditedGhost.\n' > "$WORK/data/personas/sadgpt.md"
+echo '[]' > "$WORK/data/gates/gates.json"
 out=$(deploy 2>&1) || fail "second deploy failed: $out"
 assert_contains "$(curl -sf "$BASE/api/session" -H "authorization: Bearer $token")" '"name":"Kari"' "session survives redeploy"
 grep -q EditedGhost "$WORK/data/personas/sadgpt.md" && pass "persona edits survive a redeploy" || fail "redeploy overwrote a persona edit"
+[[ "$(cat "$WORK/data/gates/gates.json")" == '[]' ]] && pass "gate edits survive a redeploy" || fail "redeploy overwrote the gates"
 
 step "Refuses to deploy without a .env on the droplet"
 mv "$WORK/app/.env" "$WORK/app/.env.bak"
