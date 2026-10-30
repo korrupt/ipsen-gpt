@@ -5,11 +5,12 @@ import { GatesTab } from './GatesTab';
 import { Login } from './Login';
 import { PeopleTab } from './PeopleTab';
 import { PhotosTab } from './PhotosTab';
+import { PointsTab } from './PointsTab';
 import { SessionsTab } from './SessionsTab';
 import { SystemTab } from './SystemTab';
 import { usePoll } from './usePoll';
 
-type Tab = 'claims' | 'sessions' | 'gates' | 'photos' | 'people' | 'system';
+type Tab = 'claims' | 'sessions' | 'points' | 'gates' | 'photos' | 'people' | 'system';
 
 export function AdminApp() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -49,6 +50,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'claims', label: 'Claims', badge: claims?.length },
     { id: 'sessions', label: 'Sessions' },
+    { id: 'points', label: 'Points' },
     { id: 'gates', label: 'Gates' },
     { id: 'photos', label: 'Photos' },
     { id: 'people', label: 'People' },
@@ -59,7 +61,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     <div className="admin">
       <header className="admin-header">
         <div className="portrait" aria-hidden="true" />
-        <h1>IpsenGPT admin</h1>
+        <h1>SadGPT admin</h1>
         <button className="btn btn--ghost btn--small" onClick={() => void adminApi.logout().finally(onLogout)}>
           Log out
         </button>
@@ -67,6 +69,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       <main className="admin-main">
         {tab === 'claims' && <ClaimsTab claims={claims} reload={reloadClaims} toast={toast} />}
         {tab === 'sessions' && <SessionsTab toast={toast} />}
+        {tab === 'points' && <PointsTab toast={toast} />}
         {tab === 'gates' && <GatesTab toast={toast} />}
         {tab === 'photos' && <PhotosTab toast={toast} />}
         {tab === 'people' && <PeopleTab toast={toast} />}

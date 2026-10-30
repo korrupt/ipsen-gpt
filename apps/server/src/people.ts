@@ -12,13 +12,24 @@ export interface Person {
   aliases: string[];
   /** Markdown body fed to the model once the claim is approved. */
   info: string;
+  /** Persona their session gets when the claim is approved (null: the global one). */
+  persona: string | null;
+  /** A persona written just for them (`persona.md` in their folder); used instead of `persona`. */
+  customPersona: string | null;
 }
 
 export interface PersonInput {
   name: string;
   aliases: string[];
   info: string;
+  /** Omitted: keep the current one. */
+  persona?: string | null;
+  /** Omitted: keep the current one. Empty or null: none. Setting one clears `persona`. */
+  customPersona?: string | null;
 }
+
+/** Longest custom persona text (same as a shared persona's character). */
+export const CUSTOM_PERSONA_MAX = 20_000;
 
 export class PeopleError extends Error {
   constructor(
@@ -32,11 +43,13 @@ export class PeopleError extends Error {
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
 const PERSON_FILE = 'person.md';
 const GATES_FILE = 'gates.json';
+const PERSONA_FILE = 'persona.md';
 const TRASH_DIR = '.trash';
 
 const Frontmatter = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string()).default([]),
+  persona: z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/, 'a persona id, e.g. sadgpt').nullish(),
 });
 
 export function slugify(name: string): string {
@@ -64,11 +77,13 @@ export function parsePersonFile(slug: string, text: string): Person {
     name: cleanName(fm.data.name),
     aliases: fm.data.aliases.map(cleanName).filter(Boolean),
     info: match[2]!.trim(),
+    persona: fm.data.persona ?? null,
+    customPersona: null,
   };
 }
 
 export function serializePerson(p: PersonInput): string {
-  const fm = YAML.stringify({ name: p.name, aliases: p.aliases }).trimEnd();
+  const fm = YAML.stringify({ name: p.name, aliases: p.aliases, ...(p.persona ? { persona: p.persona } : {}) }).trimEnd();
   return `---\n${fm}\n---\n\n${p.info.trim()}\n`;
 }
 
@@ -80,8 +95,9 @@ function writeAtomic(file: string, content: string) {
 
 /**
  * Person folders on disk are the source of truth:
- *   <dir>/<slug>/person.md   frontmatter (name, aliases) + info
+ *   <dir>/<slug>/person.md   frontmatter (name, aliases, optional persona) + info
  *   <dir>/<slug>/gates.json  this person's custom gates (Phase 4)
+ *   <dir>/<slug>/persona.md  optional: a persona written just for them (Phase 5)
  */
 export class PeopleStore {
   private people = new Map<string, Person>();
@@ -112,6 +128,8 @@ export class PeopleStore {
       let person: Person;
       try {
         person = parsePersonFile(slug, fs.readFileSync(file, 'utf8'));
+        const custom = path.join(this.dir, slug, PERSONA_FILE);
+        if (fs.existsSync(custom)) person.customPersona = fs.readFileSync(custom, 'utf8').trim() || null;
       } catch (err) {
         errors.push(`${slug}: ${err instanceof Error ? err.message : String(err)}`);
         continue;
@@ -147,10 +165,18 @@ export class PeopleStore {
 
   /** Creates (no slug) or updates a person. Returns the saved person. */
   save(input: PersonInput, slug?: string): Person {
+    const existing = slug !== undefined ? this.people.get(slug) : undefined;
+    const customPersona =
+      input.customPersona !== undefined ? input.customPersona?.trim() || null : (existing?.customPersona ?? null);
+    if (customPersona && customPersona.length > CUSTOM_PERSONA_MAX) {
+      throw new PeopleError(`Keep their persona under ${CUSTOM_PERSONA_MAX} characters.`);
+    }
     const clean: PersonInput = {
       name: cleanName(input.name),
       aliases: [...new Set(input.aliases.map(cleanName).filter(Boolean))],
       info: input.info.trim(),
+      // A custom persona replaces a picked one.
+      persona: customPersona ? null : input.persona !== undefined ? input.persona : (existing?.persona ?? null),
     };
     for (const n of [clean.name, ...clean.aliases]) {
       const err = validateName(n);
@@ -175,6 +201,9 @@ export class PeopleStore {
     const folder = path.join(this.dir, slug);
     fs.mkdirSync(folder, { recursive: true });
     writeAtomic(path.join(folder, PERSON_FILE), serializePerson(clean));
+    const personaFile = path.join(folder, PERSONA_FILE);
+    if (customPersona) writeAtomic(personaFile, `${customPersona}\n`);
+    else fs.rmSync(personaFile, { force: true });
     const gates = path.join(folder, GATES_FILE);
     if (!fs.existsSync(gates)) writeAtomic(gates, '[]\n');
 

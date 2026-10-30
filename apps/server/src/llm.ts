@@ -12,7 +12,7 @@ export interface ProbeResult {
 }
 
 /** Shown to guests while the PC can't be reached. */
-export const DISCONNECTED_MESSAGE = 'IpsenGPT has lost contact with the spirit world. Hang on, it will be back shortly.';
+export const DISCONNECTED_MESSAGE = 'SadGPT has gone quiet and needs a moment alone. Hang on, it will be back shortly.';
 
 /** Whether guests can chat right now, and if not, what they are told. */
 export type ChatStatus =

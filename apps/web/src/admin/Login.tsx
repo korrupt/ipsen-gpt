@@ -21,7 +21,7 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <form className="admin-login" onSubmit={submit}>
       <div className="portrait" aria-hidden="true" />
-      <h1>IpsenGPT admin</h1>
+      <h1>SadGPT admin</h1>
       <input
         className="admin-input"
         type="password"

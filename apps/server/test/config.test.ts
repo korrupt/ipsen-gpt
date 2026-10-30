@@ -14,8 +14,9 @@ describe('parseConfig', () => {
   });
 
   it('resolves relative paths against the base dir and keeps absolute ones', () => {
-    const c = parseConfig({ PERSONA_PATH: 'content/p.md', WEB_DIST: '/srv/web' }, '/base');
-    expect(c.chat.personaPath).toBe(path.resolve('/base/content/p.md'));
+    const c = parseConfig({ PERSONAS_DIR: 'content/p', WEB_DIST: '/srv/web' }, '/base');
+    expect(c.chat.personasDir).toBe(path.resolve('/base/content/p'));
+    expect(c.chat.defaultPersona).toBe('sadgpt');
     expect(c.webDist).toBe('/srv/web');
   });
 

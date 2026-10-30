@@ -2,7 +2,7 @@ import { ApiError, authHeaders, checkResponse, NETWORK_ERROR } from './session';
 
 export interface GateView {
   id: string;
-  /** What IpsenGPT demands, in character. */
+  /** What SadGPT demands, in character. */
   prompt: string;
   /** When the gate expires (ms since epoch), or null. */
   deadlineAt: number | null;

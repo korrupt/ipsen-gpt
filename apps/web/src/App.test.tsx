@@ -11,7 +11,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const input = () => screen.getByRole('textbox', { name: /message ipsengpt/i });
+const input = () => screen.getByRole('textbox', { name: /message sadgpt/i });
 const sendButton = () => screen.getByRole('button', { name: /send message/i });
 const nameInput = () => screen.getByRole('textbox', { name: /your name/i });
 
@@ -123,7 +123,7 @@ describe('chat', () => {
   it('caps input at 500 characters and shows a counter near the limit', async () => {
     asReturningGuest();
     render(<App />);
-    const el = (await screen.findByRole('textbox', { name: /message ipsengpt/i })) as HTMLTextAreaElement;
+    const el = (await screen.findByRole('textbox', { name: /message sadgpt/i })) as HTMLTextAreaElement;
     expect(el.maxLength).toBe(500);
     expect(sendButton()).toHaveProperty('disabled', true);
     await userEvent.click(el);
@@ -136,7 +136,7 @@ describe('chat', () => {
     asReturningGuest({ 'POST /api/chat': () => response });
     render(<App />);
 
-    await userEvent.type(await screen.findByRole('textbox', { name: /message ipsengpt/i }), 'Hello ghost{Enter}');
+    await userEvent.type(await screen.findByRole('textbox', { name: /message sadgpt/i }), 'Hello ghost{Enter}');
     expect(screen.getByTestId('msg-user').textContent).toBe('Hello ghost');
     await waitFor(() => expect(screen.getByTestId('msg-assistant').textContent).toContain('Greetings,'));
     expect(screen.getByTestId('header-portrait').className).toContain('portrait--thinking');
@@ -151,7 +151,7 @@ describe('chat', () => {
   it('Shift+Enter inserts a newline instead of sending', async () => {
     const fetch = asReturningGuest();
     render(<App />);
-    await userEvent.type(await screen.findByRole('textbox', { name: /message ipsengpt/i }), 'line1{Shift>}{Enter}{/Shift}line2');
+    await userEvent.type(await screen.findByRole('textbox', { name: /message sadgpt/i }), 'line1{Shift>}{Enter}{/Shift}line2');
     expect((input() as HTMLTextAreaElement).value).toBe('line1\nline2');
     expect(fetch.mock.calls.filter(([url]) => url === '/api/chat')).toHaveLength(0);
   });
@@ -165,7 +165,7 @@ describe('chat', () => {
           : streamResponse([tokens('Back from the dead.'), sse('done', {})]).response,
     });
     render(<App />);
-    await userEvent.type(await screen.findByRole('textbox', { name: /message ipsengpt/i }), 'hello{Enter}');
+    await userEvent.type(await screen.findByRole('textbox', { name: /message sadgpt/i }), 'hello{Enter}');
     await waitFor(() => expect(screen.getByText('Lost contact with the other side.')).toBeTruthy());
 
     await userEvent.click(screen.getByRole('button', { name: /try again/i }));
@@ -179,14 +179,14 @@ describe('chat', () => {
   it('shows rate-limit messages as an error reply', async () => {
     asReturningGuest({ 'POST /api/chat': () => json({ error: 'Slow down, mortal.' }, 429) });
     render(<App />);
-    await userEvent.type(await screen.findByRole('textbox', { name: /message ipsengpt/i }), 'hi{Enter}');
+    await userEvent.type(await screen.findByRole('textbox', { name: /message sadgpt/i }), 'hi{Enter}');
     expect(await screen.findByText('Slow down, mortal.')).toBeTruthy();
   });
 
   it('when the admin ends the session, returns to the name picker with a notice', async () => {
     asReturningGuest({ 'POST /api/chat': () => json({ error: 'session_invalid' }, 401) });
     render(<App />);
-    await userEvent.type(await screen.findByRole('textbox', { name: /message ipsengpt/i }), 'hi{Enter}');
+    await userEvent.type(await screen.findByRole('textbox', { name: /message sadgpt/i }), 'hi{Enter}');
     expect((await screen.findByRole('status')).textContent).toBe(SESSION_ENDED_NOTICE);
     expect(getToken()).toBeNull();
   });
@@ -196,7 +196,7 @@ describe('chat', () => {
       'POST /api/chat': (init) => streamResponse([tokens('Partial')], { hold: true, signal: init.signal }).response,
     });
     render(<App />);
-    await userEvent.type(await screen.findByRole('textbox', { name: /message ipsengpt/i }), 'hi{Enter}');
+    await userEvent.type(await screen.findByRole('textbox', { name: /message sadgpt/i }), 'hi{Enter}');
     await waitFor(() => expect(screen.getByTestId('msg-assistant').textContent).toContain('Partial'));
     await userEvent.click(screen.getByRole('button', { name: /stop generating/i }));
     await waitFor(() => expect(sendButton()).toBeTruthy());

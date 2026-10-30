@@ -5,12 +5,56 @@ export interface AdminSession {
   name: string | null;
   state: SessionState;
   claimCode: string | null;
-  person: { slug: string; name: string } | null;
+  /** `hasCustomPersona`: you wrote a persona just for them (People). */
+  person: { slug: string; name: string; hasCustomPersona?: boolean } | null;
   claimPerson: { slug: string; name: string } | null;
   notice: string | null;
+  /** This guest's own persona; null: the global one. */
+  personaId: string | null;
+  points: number;
   createdAt: number;
   lastSeenAt: number;
   messageCount?: number;
+}
+
+export interface PersonaInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface Personas {
+  personas: PersonaInfo[];
+  errors: string[];
+  /** The global persona. */
+  activeId: string;
+  defaultId: string;
+  /** The shipped personas; `inUse`: one with that id exists. */
+  defaults: (PersonaInfo & { inUse: boolean })[];
+}
+
+export interface PersonaEdit {
+  name: string;
+  description: string;
+  /** The character text. */
+  body: string;
+}
+
+export interface AdminReward {
+  id: string;
+  threshold: number;
+  prize: string;
+  revealed: boolean;
+  winnerId: string | null;
+  winnerName: string | null;
+  wonAt: number | null;
+  createdAt: number;
+}
+
+export interface PointsOverview {
+  leaderboard: { rank: number; sessionId: string; name: string; points: number }[];
+  rewards: AdminReward[];
+  recent: { id: number; sessionId: string; sessionName: string | null; amount: number; reason: string; source: 'gate' | 'admin'; createdAt: number }[];
 }
 
 export interface AdminMessage {
@@ -24,6 +68,10 @@ export interface AdminPerson {
   name: string;
   aliases: string[];
   info: string;
+  /** Persona their session gets when approved; null: the global one. */
+  persona: string | null;
+  /** A persona written just for them; used instead of `persona`. */
+  customPersona: string | null;
   claimedBy: { id: string; name: string | null } | null;
 }
 
@@ -31,6 +79,8 @@ export interface PersonInput {
   name: string;
   aliases: string[];
   info: string;
+  persona: string | null;
+  customPersona: string | null;
 }
 
 export interface ProbeResult {
@@ -175,6 +225,27 @@ export const adminApi = {
   releaseName: (id: string) =>
     call<{ session: AdminSession }>('POST', `/sessions/${id}/release-name`, {}).then((r) => r.session),
   endSession: (id: string) => call<{ ok: true }>('POST', `/sessions/${id}/end`, {}),
+  setSessionPersona: (id: string, personaId: string | null) =>
+    call<{ session: AdminSession }>('PUT', `/sessions/${id}/persona`, { id: personaId }).then((r) => r.session),
+
+  personas: () => call<Personas>('GET', '/personas'),
+  setActivePersona: (id: string | null) => call<{ activeId: string }>('PUT', '/personas/active', { id }),
+  persona: (id: string) => call<{ persona: PersonaInfo & { body: string }; hasDefault: boolean }>('GET', `/personas/${id}`),
+  createPersona: (p: PersonaEdit) => call<{ persona: PersonaInfo }>('POST', '/personas', p).then((r) => r.persona),
+  updatePersona: (id: string, p: PersonaEdit) => call<{ persona: PersonaInfo }>('PUT', `/personas/${id}`, p).then((r) => r.persona),
+  deletePersona: (id: string) => call<{ ok: true }>('DELETE', `/personas/${id}`),
+  restorePersona: (id: string) => call<{ persona: PersonaInfo }>('POST', `/personas/${id}/restore`, {}).then((r) => r.persona),
+  personaRules: () => call<{ text: string }>('GET', '/personas/rules').then((r) => r.text),
+  savePersonaRules: (text: string) => call<{ text: string }>('PUT', '/personas/rules', { text }).then((r) => r.text),
+
+  points: () => call<PointsOverview>('GET', '/points'),
+  award: (sessionId: string, amount: number, reason: string) =>
+    call<{ total: number }>('POST', '/points', { sessionId, amount, reason }),
+  addReward: (threshold: number, prize: string, revealed: boolean) =>
+    call<{ reward: AdminReward }>('POST', '/rewards', { threshold, prize, revealed }).then((r) => r.reward),
+  updateReward: (id: string, patch: Partial<Pick<AdminReward, 'threshold' | 'prize' | 'revealed'>>) =>
+    call<{ reward: AdminReward }>('PATCH', `/rewards/${id}`, patch).then((r) => r.reward),
+  deleteReward: (id: string) => call<{ ok: true }>('DELETE', `/rewards/${id}`),
 
   system: () => call<SystemStatus>('GET', '/system'),
   pause: (reason: string) => call<{ pauseReason: string; status: ChatStatus }>('PUT', '/system/pause', { reason }),

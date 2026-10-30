@@ -103,6 +103,39 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX photo_attempts_session ON photo_attempts (session_id, created_at);
   `,
+  `
+  -- Every point change. A session's score is the sum of its rows.
+  CREATE TABLE points (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    amount     INTEGER NOT NULL,
+    reason     TEXT NOT NULL,
+    source     TEXT NOT NULL CHECK (source IN ('gate', 'admin')),
+    -- The gate a 'gate' row came from; a gate pays out once.
+    gate_id    TEXT UNIQUE REFERENCES gates (id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX points_session ON points (session_id, created_at);
+  -- Gates passed before the ledger existed.
+  INSERT INTO points (session_id, amount, reason, source, gate_id, created_at)
+    SELECT session_id, points, 'Photo gate: ' || target, 'gate', id, COALESCE(resolved_at, created_at)
+    FROM gates WHERE status = 'passed' AND points != 0;
+
+  -- "First to <threshold> points": won once, by the first session to get there.
+  CREATE TABLE rewards (
+    id         TEXT PRIMARY KEY,
+    threshold  INTEGER NOT NULL CHECK (threshold > 0),
+    prize      TEXT NOT NULL,
+    -- 0: guests see the goal but the prize as "???".
+    revealed   INTEGER NOT NULL DEFAULT 0,
+    winner_id  TEXT REFERENCES sessions (id) ON DELETE SET NULL,
+    won_at     INTEGER,
+    created_at INTEGER NOT NULL
+  );
+
+  -- A persona for this session only (null: the global one).
+  ALTER TABLE sessions ADD COLUMN persona_id TEXT;
+  `,
 ];
 
 export function openDb(dbPath: string): Db {

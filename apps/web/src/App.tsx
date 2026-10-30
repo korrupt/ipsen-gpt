@@ -4,16 +4,19 @@ import { ClaimBanner } from './components/ClaimBanner';
 import { Composer } from './components/Composer';
 import { GatePanel } from './components/GatePanel';
 import { Header } from './components/Header';
+import { LeaderboardSheet } from './components/LeaderboardSheet';
+import { Toast } from './components/Toast';
 import { MessageList, type Message } from './components/MessageList';
 import { NamePicker } from './components/NamePicker';
 import { useVisualViewport } from './hooks/useVisualViewport';
 import { sendChat } from './lib/chatApi';
-import { connectEvents, OPEN, type ChatStatus } from './lib/events';
+import { connectEvents, OPEN, rewardGoal, type ChatStatus, type Scoreboard, type Standing } from './lib/events';
 import type { GateView, VerifyResult } from './lib/photos';
 import {
   ApiError,
   chooseName,
   createSession,
+  fetchLeaderboard,
   fetchSession,
   getToken,
   SessionGoneError,
@@ -46,6 +49,12 @@ export function App() {
   const [streaming, setStreaming] = useState(false);
   /** Whether chat is open (the PC is reachable and the host hasn't paused it); pushed live. */
   const [chatStatus, setChatStatus] = useState<ChatStatus>(OPEN);
+  const [standing, setStanding] = useState<Standing | null>(null);
+  const [board, setBoard] = useState<Scoreboard | null>(null);
+  const [showScores, setShowScores] = useState(false);
+  /** A short notice: points from the host, a reward won. */
+  const [toast, setToast] = useState<string | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
   const abortRef = useRef<AbortController | null>(null);
 
   /** Applies a fresh session view from the server and picks the right screen. */
@@ -81,10 +90,29 @@ export function App() {
   const inChat = screen.kind === 'chat';
   useEffect(() => {
     if (!inChat) return;
-    return connectEvents({ onStatus: setChatStatus, onGate: setGate, onSessionGone: sessionGone });
+    return connectEvents({
+      onStatus: setChatStatus,
+      onGate: setGate,
+      onSessionGone: sessionGone,
+      onStanding: setStanding,
+      onScoreboard: setBoard,
+      onPointsAwarded: ({ amount, reason }) => setToast(`${amount > 0 ? '+' : ''}${amount} points: ${reason}`),
+      onRewardWon: (r) => setToast(`You won! ${rewardGoal(r)}${r.prize ? `: ${r.prize}` : '. Find SadGPT\'s human for your prize.'}`),
+    });
   }, [inChat, sessionGone]);
 
-  // While a claim is pending, check for approval/rejection. (Phase 5 moves this onto the live events.)
+  const openScores = useCallback(() => {
+    setShowScores(true);
+    // The live stream normally keeps these fresh; this covers a stream that's down.
+    fetchLeaderboard()
+      .then(({ me, ...rest }) => {
+        setBoard(rest);
+        setStanding(me);
+      })
+      .catch(() => {});
+  }, []);
+
+  // While a claim is pending, check for approval/rejection. (Phase 6 moves this onto the live events.)
   useEffect(() => {
     if (session?.state !== 'pending_claim') return;
     const timer = setInterval(async () => {
@@ -189,12 +217,21 @@ export function App() {
 
   return (
     <div className="app">
-      <Header thinking={streaming} name={screen.kind === 'chat' ? session?.name : null} />
+      <Header
+        thinking={streaming}
+        name={screen.kind === 'chat' ? session?.name : null}
+        points={screen.kind === 'chat' ? (standing?.points ?? null) : null}
+        onScores={openScores}
+      />
+      {toast && <Toast message={toast} onDone={clearToast} />}
+      {showScores && screen.kind === 'chat' && (
+        <LeaderboardSheet board={board} standing={standing} name={session?.name ?? null} onClose={() => setShowScores(false)} />
+      )}
       {screen.kind === 'loading' && <main className="messages" aria-busy="true" />}
       {screen.kind === 'offline' && (
         <main className="messages">
           <div className="empty">
-            <p>The spirits could not reach the server.</p>
+            <p>SadGPT could not reach the server. Typical.</p>
             <button type="button" className="link-button" onClick={() => void load()}>
               Try again
             </button>

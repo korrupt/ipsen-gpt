@@ -31,10 +31,10 @@ export async function refusedUrl(): Promise<string> {
 
 export function makeConfig(overrides: Record<string, string> = {}): Config {
   const dir = tempDir();
-  fs.writeFileSync(path.join(dir, 'persona.md'), TEST_PERSONA);
+  writePersona(path.join(dir, 'personas'), 'sadgpt', 'Test SadGPT', TEST_PERSONA);
   return parseConfig(
     {
-      PERSONA_PATH: 'persona.md',
+      PERSONAS_DIR: 'personas',
       WEB_DIST: 'no-such-dist',
       DB_PATH: ':memory:',
       PEOPLE_DIR: 'people',
@@ -48,6 +48,12 @@ export function makeConfig(overrides: Record<string, string> = {}): Config {
     },
     dir,
   );
+}
+
+/** Writes a persona file (`<dir>/<id>.md`), as you would by hand on the server. */
+export function writePersona(dir: string, id: string, name: string, body: string, description = '') {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.md`), `---\nname: ${name}\ndescription: ${description}\n---\n${body}\n`);
 }
 
 /** Writes a person folder directly, as you would by hand on the server. */

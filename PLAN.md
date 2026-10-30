@@ -1,9 +1,9 @@
-# IpsenGPT — Halloween Costume Chatbot Build Spec
+# SadGPT (formerly IpsenGPT) — Halloween Costume Chatbot Build Spec
 
-A full-screen, mobile-first chat website for a Halloween costume. Guests scan a QR code, pick a name, and chat with an in-character AI called IpsenGPT (styled as a ChatGPT lookalike). Some guests are pre-registered with info I've written about them; they claim their identity by showing me a short code, which I approve in the admin dashboard. Sessions persist through the night (token in localStorage, state in SQLite).
+A full-screen, mobile-first chat website for a Halloween costume. Guests scan a QR code, pick a name, and chat with an in-character AI called SadGPT, a sad emo chatbot (styled as a ChatGPT lookalike). Some guests are pre-registered with info I've written about them; they claim their identity by showing me a short code, which I approve in the admin dashboard. Sessions persist through the night (token in localStorage, state in SQLite).
 
-- **Character name:** IpsenGPT
-- **Character description / voice:** TODO
+- **Character name:** SadGPT (rebranded from IpsenGPT on 2026-10-30; matches the costume tee)
+- **Character description / voice:** a sad emo chatbot. Several personas in `content/personas/`, switchable in admin (see Phase 5).
 - **Domain:** chat.ipsen.no
 - **Photo gate targets:** TODO (defined in `gates.json`, plus per-person gates)
 
@@ -134,7 +134,14 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
 - Limits: per-sender cooldown (e.g. 2 min), max 2 active curses per victim, curses expire after `duration_messages`.
 - Guests can never see another guest's conversation.
 
-## Secrets game & leaderboard (proposal — confirm before Phase 6)
+## Leaderboard, points, rewards & personas (Phase 5)
+
+- **Points ledger:** every point change is a row (session, amount, reason, source). Sources for now: passing a photo gate (its `points`) and the admin giving or taking points with a reason. Later sources (curses, secrets) add rows the same way. How guests earn points beyond that is **still to be decided**.
+- **Leaderboard:** named, live sessions with points, highest first; ties go to whoever got there first. Guests see it in a drawer and see their own total in the header. Updates live over `/api/events`.
+- **Rewards:** "First to N points: <prize>". The first guest to reach N wins it, automatically and for good (taking points away later doesn't undo it). Each reward has its own **show/hide** switch: hidden prizes show as "???" to guests, the goal is always visible. The winner gets a notification.
+- **Personas:** files in `content/personas/<id>.md` (frontmatter `name`, `description` + the character). Admin picks the global persona (System) and can override it for any guest session (Sessions). A person's folder can set a default `persona`, applied when their claim is approved or they are assigned. Shared rules (length, safety, language, "you can't give points") live in `content/personas/_rules.md` and come first in every prompt.
+
+## Secrets game (proposal — confirm before Phase 7)
 
 - Gandalf-style: IpsenGPT guards secret words across levels. Guests extract them and submit them in a separate "submit secret" field. The server checks for an exact match and awards points.
 - **Secrets are generated per session** from a word list, so guests can't just share answers.
@@ -143,8 +150,7 @@ Gaming PC (Windows host, everything runs inside WSL2 Ubuntu)
   2. The prompt says never to reveal it.
   3. **Output filter in code:** block any reply containing the secret (case-insensitive, also with spaces/punctuation removed and reversed).
   4. Level 3 + an input filter + must pass a `secret_level` gate first.
-- Points also come from passing gates. Curses may cost points (tunable).
-- Leaderboard drawer in the UI. Admin toggle: show display names or anonymous aliases.
+- Correct secrets add points to the Phase 5 ledger. Curses may cost points (tunable).
 
 ## Live events & notifications
 
@@ -216,15 +222,16 @@ Build one phase at a time. **Stop after each phase**, summarize what was built, 
 2. **Sessions & identity:** SQLite, names, reserved names, claim codes, person folders, rate limits, admin login + claims + sessions + people screens.
 3. **Deployment:** Docker Compose, Nginx + certbot config, SSH tunnel script + restricted tunnel user, model status (chat closes while the PC is unreachable), backups, README. Deploy and test on the real droplet early.
 4. **Photo gates:** gate definitions + triggers, forced gates (single and global), consent checkbox, two-step upload, verification, storage + EXIF stripping, admin photo gallery with delete.
-5. **Curses + live events:** curse menu, effects, counter-curses, curse-break gates, SSE events with reconnect queue, in-page notifications.
-6. **Secrets game + leaderboard** (after I confirm the design).
-7. **Hardening & testing:**
+5. **SadGPT, leaderboard & points:** rebrand to SadGPT (name, logo from the tee design, copy), persona list with a global switch and per-session overrides, points ledger (gates + admin awards), leaderboard drawer, "first to N points" rewards with per-reward prize reveal.
+6. **Curses + live events:** curse menu, effects, counter-curses, curse-break gates, SSE events with reconnect queue, in-page notifications. (The live event stream itself was built early, in Phase 3.)
+7. **Secrets game** (after I confirm the design).
+8. **Hardening & testing:**
    - load-test script simulating ~30 concurrent guests
    - prompt-injection tests against gates and secrets
    - "pull the plug on the PC" test (chat closes and reopens, unverified gate path)
    - kill and restart the app container, verify data survives
    - mobile checks on iOS Safari and Android Chrome
-8. **Skin pass:** final theme assets.
+9. **Skin pass:** final theme assets.
 
 ## Open questions
 

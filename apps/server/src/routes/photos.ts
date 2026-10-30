@@ -7,7 +7,7 @@ import type { Services } from '../services.js';
 import { isPass, parseVerdict, VERDICT_FORMAT, verifyMessages } from '../verify.js';
 
 export const NOT_A_PHOTO = "That doesn't look like a photo. Try another one.";
-export const VERIFY_BUSY = 'IpsenGPT is still looking at your last photo.';
+export const VERIFY_BUSY = 'SadGPT is still staring at your last photo.';
 
 /** Accepts any Content-Type: the bytes decide what it is. */
 const rawBody = (limit: number | string) => express.raw({ type: () => true, limit });
@@ -22,7 +22,7 @@ const rawBody = (limit: number | string) => express.raw({ type: () => true, limi
  */
 export function photosRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { sessions, gates, photos, limiter, llm, verifying, log } = services;
+  const { sessions, gates, photos, limiter, llm, verifying, log, points } = services;
 
   /** Everything that can be refused before reading the body. */
   const checkVerify = (req: Request, res: Response, next: NextFunction) => {
@@ -80,7 +80,10 @@ export function photosRouter(config: Config, services: Services): Router {
     }
     photos.setVerdict(attemptId, 'passed', verdict);
     // The gate may have expired or been cancelled while the model looked.
-    if (gates.get(gate.id)?.status === 'active') gates.pass(gate.id);
+    if (gates.get(gate.id)?.status === 'active') {
+      gates.pass(gate.id);
+      if (gate.points !== 0) points.award(gate.sessionId, gate.points, `Photo: ${gate.target}`, 'gate', gate.id);
+    }
     return { result: 'passed', message: VERDICT_LINES.passed, reason: null } as const;
   };
 

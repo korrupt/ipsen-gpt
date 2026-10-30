@@ -13,17 +13,17 @@ import { openSse, type SseStream } from '../sse.js';
 export interface ChatRouteDeps {
   config: Config;
   services: Services;
-  getPersona: () => string;
+  getPersona: (session: Session) => string;
   log: (msg: string, err?: unknown) => void;
 }
 
 /** Shown to the guest when the model fails. Real errors are only logged. */
 export const MODEL_FAILURE_MESSAGE =
-  'IpsenGPT has lost contact with the other side. Try again in a moment.';
+  'SadGPT lost its train of thought. It happens. Try again in a moment.';
 
-export const BUSY_MESSAGE = 'IpsenGPT is still answering your last message.';
+export const BUSY_MESSAGE = 'SadGPT is still answering your last message.';
 
-/** System prompt sections describing who IpsenGPT is talking to. */
+/** System prompt sections describing who SadGPT is talking to. */
 export function guestSections(session: Session, people: PeopleStore): string[] {
   const person = session.state === 'claimed' && session.personSlug ? people.get(session.personSlug) : undefined;
   if (person) {
@@ -85,7 +85,7 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
       const canned = DEFAULT_REFUSALS[n % DEFAULT_REFUSALS.length]!;
       let persona: string;
       try {
-        persona = getPersona();
+        persona = getPersona(session);
       } catch (err) {
         log('Failed to load persona', err);
         sse.send('token', { text: canned });
@@ -146,7 +146,7 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
 
     let persona: string;
     try {
-      persona = getPersona();
+      persona = getPersona(session);
     } catch (err) {
       log('Failed to load persona', err);
       res.status(500).json({ error: MODEL_FAILURE_MESSAGE });

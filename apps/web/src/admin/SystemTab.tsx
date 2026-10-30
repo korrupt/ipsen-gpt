@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { adminApi, ago, type SystemStatus } from './api';
+import { adminApi, ago, type Personas, type SystemStatus } from './api';
+import { PersonaEditor, PersonaList, RulesEditor, type PersonaEditing } from './PersonasEditor';
+import { usePersonas } from './PersonaSelect';
 import { usePoll } from './usePoll';
 
 function ModelCard({ model }: { model: SystemStatus['model'] }) {
@@ -68,7 +70,7 @@ function PauseCard({ pauseReason, onChange, toast }: { pauseReason: string | nul
       <input
         id="pause-reason"
         className="admin-input"
-        placeholder="What guests see, e.g. Speeches! IpsenGPT is back in 10 minutes."
+        placeholder="What guests see, e.g. Speeches! SadGPT is back in 10 minutes."
         maxLength={300}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
@@ -82,8 +84,79 @@ function PauseCard({ pauseReason, onChange, toast }: { pauseReason: string | nul
   );
 }
 
+/** The persona everyone gets unless their session has its own. */
+function GlobalPersonaCard({
+  personas,
+  reload,
+  toast,
+}: {
+  personas: Personas | null;
+  reload: () => Promise<void>;
+  toast: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (!personas) return null;
+  const active = personas.personas.find((p) => p.id === personas.activeId);
+
+  const pick = async (id: string) => {
+    setBusy(true);
+    try {
+      await adminApi.setActivePersona(id);
+      await reload();
+      toast(`Persona: ${personas.personas.find((p) => p.id === id)?.name ?? id}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card" data-testid="global-persona">
+      <label className="admin-label" htmlFor="global-persona">
+        Persona for everyone (guests with their own, set in Sessions, keep theirs)
+      </label>
+      <select
+        id="global-persona"
+        className="admin-input"
+        value={personas.activeId}
+        disabled={busy}
+        onChange={(e) => void pick(e.target.value)}
+      >
+        {personas.personas.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+            {p.id === personas.defaultId ? ' (default)' : ''}
+          </option>
+        ))}
+      </select>
+      {active?.description && <div className="admin-muted">{active.description}</div>}
+      <div className="admin-muted">Takes effect on everyone's next message.</div>
+      {personas.errors.map((e) => (
+        <p key={e} className="admin-error">
+          {e}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export function SystemTab({ toast }: { toast: (msg: string) => void }) {
   const { data, reload, error } = usePoll(adminApi.system, 10000);
+  const [personas, reloadPersonas] = usePersonas();
+  const [editing, setEditing] = useState<PersonaEditing | null>(null);
+
+  if (editing) {
+    const done = () => {
+      setEditing(null);
+      void reloadPersonas();
+    };
+    return editing.kind === 'rules' ? (
+      <RulesEditor toast={toast} onDone={done} />
+    ) : (
+      <PersonaEditor id={editing.id} toast={toast} onDone={done} />
+    );
+  }
 
   if (!data) return <p className="admin-muted admin-tab">{error ?? 'Loading…'}</p>;
   const { model, status, pauseReason, listeners, errors } = data;
@@ -96,6 +169,8 @@ export function SystemTab({ toast }: { toast: (msg: string) => void }) {
       </p>
       <ModelCard model={model} />
       <PauseCard pauseReason={pauseReason} onChange={reload} toast={toast} />
+      <GlobalPersonaCard personas={personas} reload={reloadPersonas} toast={toast} />
+      {personas && <PersonaList personas={personas} onEdit={setEditing} onChanged={reloadPersonas} toast={toast} />}
       <h3 className="admin-h3">Recent errors</h3>
       {errors.length === 0 && <p className="admin-muted">None.</p>}
       <ul className="admin-list">

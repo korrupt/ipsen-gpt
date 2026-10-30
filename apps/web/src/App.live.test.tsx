@@ -10,10 +10,10 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const input = () => screen.getByRole('textbox', { name: /message ipsengpt/i }) as HTMLTextAreaElement;
+const input = () => screen.getByRole('textbox', { name: /message sadgpt/i }) as HTMLTextAreaElement;
 const sendButton = () => screen.getByRole('button', { name: /send message/i });
 
-const CLOSED = { open: false, reason: 'disconnected', message: 'IpsenGPT has lost contact with the spirit world.' };
+const CLOSED = { open: false, reason: 'disconnected', message: 'SadGPT has lost contact with the spirit world.' };
 const OPEN = { open: true, reason: null, message: null };
 const PUMPKIN = { id: 'g1', prompt: 'Bring me a pumpkin!', deadlineAt: null };
 
@@ -136,5 +136,74 @@ describe('live events', () => {
     });
     render(<App />);
     expect(await screen.findByRole('textbox', { name: /your name/i })).toBeTruthy();
+  });
+});
+
+describe('points and the leaderboard', () => {
+  const BOARD = {
+    top: [
+      { rank: 1, name: 'Per', points: 40 },
+      { rank: 2, name: 'Kari', points: 12 },
+    ],
+    rewards: [
+      { id: 'r1', threshold: 10, prize: null, winner: 'Kari' },
+      { id: 'r2', threshold: 50, prize: 'A bag of sad candy', winner: null },
+    ],
+  };
+
+  it('the header shows my points once known, and opens the leaderboard with hidden prizes as ???', async () => {
+    const { live } = returningGuest({ 'GET /api/leaderboard': () => json({ ...BOARD, me: { points: 12, rank: 2 } }) });
+    render(<App />);
+    await waitFor(() => expect(live.connections()).toBe(1));
+    expect(screen.queryByTestId('score-button')).toBeNull();
+
+    await live.push('points', { points: 12, rank: 2 });
+    await live.push('scoreboard', BOARD);
+    const button = screen.getByTestId('score-button');
+    expect(button.textContent).toBe('12');
+    expect(button.getAttribute('aria-label')).toBe('12 points. Open the leaderboard');
+
+    await userEvent.click(button);
+    const dialog = screen.getByRole('dialog', { name: 'Leaderboard' });
+    const rows = screen.getByTestId('leaderboard').querySelectorAll('li');
+    expect([...rows].map((r) => r.textContent)).toEqual(['1Per40', '2Kari12']);
+    expect(rows[1]!.className).toContain('board__row--me');
+    expect(screen.getByTestId('rewards').textContent).toBe(
+      'First to 10 points???Won by KariFirst to 50 pointsA bag of sad candyUp for grabs',
+    );
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows my own place when I am outside the top, and updates live while open', async () => {
+    const others = { ...BOARD, top: [{ rank: 1, name: 'Per', points: 40 }] };
+    const { live } = returningGuest({ 'GET /api/leaderboard': () => json({ ...others, me: { points: 3, rank: 14 } }) });
+    render(<App />);
+    await waitFor(() => expect(live.connections()).toBe(1));
+    await live.push('points', { points: 3, rank: 14 });
+    await userEvent.click(screen.getByTestId('score-button'));
+    expect((await screen.findByTestId('my-standing')).textContent).toBe('You: 3 points, place 14');
+
+    await live.push('scoreboard', { ...others, rewards: [{ ...BOARD.rewards[0], prize: 'Revealed!' }] });
+    expect(screen.getByTestId('rewards').textContent).toContain('Revealed!');
+  });
+
+  it('tells me when the host gives me points and when I win a reward', async () => {
+    const { live } = returningGuest();
+    render(<App />);
+    await waitFor(() => expect(live.connections()).toBe(1));
+
+    await live.push('points_awarded', { amount: 10, reason: 'Saddest costume' });
+    expect(screen.getByTestId('toast').textContent).toBe('+10 points: Saddest costume');
+
+    await live.push('reward_won', { id: 'r1', threshold: 10, prize: null, winner: 'Kari' });
+    expect(screen.getByTestId('toast').textContent).toBe("You won! First to 10 points. Find SadGPT's human for your prize.");
+
+    await live.push('reward_won', { id: 'r2', threshold: 50, prize: 'Candy', winner: 'Kari' });
+    expect(screen.getByTestId('toast').textContent).toBe('You won! First to 50 points: Candy');
+    await userEvent.click(screen.getByTestId('toast'));
+    expect(screen.queryByTestId('toast')).toBeNull();
   });
 });

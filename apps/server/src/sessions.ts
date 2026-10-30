@@ -16,6 +16,8 @@ export interface Session {
   claimPersonSlug: string | null;
   /** One-off message for the guest, e.g. why they must pick a new name. */
   notice: string | null;
+  /** This session's persona; null: the global one. */
+  personaId: string | null;
   createdAt: number;
   lastSeenAt: number;
 }
@@ -45,7 +47,7 @@ export class SessionError extends Error {
 }
 
 export const NOTICES = {
-  claimRejected: "IpsenGPT's keeper didn't confirm that name. Pick another one.",
+  claimRejected: "SadGPT's human didn't confirm that name. Pick another one.",
   claimedByOther: 'Someone else was confirmed under that name. Pick another one.',
   nameReleased: 'Your name was released. Pick a new one.',
 } as const;
@@ -60,6 +62,7 @@ interface Row {
   claim_code: string | null;
   claim_person_slug: string | null;
   notice: string | null;
+  persona_id: string | null;
   created_at: number;
   last_seen_at: number;
 }
@@ -72,6 +75,7 @@ const toSession = (r: Row): Session => ({
   claimCode: r.claim_code,
   claimPersonSlug: r.claim_person_slug,
   notice: r.notice,
+  personaId: r.persona_id,
   createdAt: r.created_at,
   lastSeenAt: r.last_seen_at,
 });
@@ -230,6 +234,13 @@ export class SessionStore {
     })();
   }
 
+  /** null: back to the global persona. */
+  setPersona(id: string, personaId: string | null): Session {
+    if (!this.get(id)) throw new SessionError('Session not found', 404);
+    this.db.prepare('UPDATE sessions SET persona_id = ? WHERE id = ?').run(personaId, id);
+    return this.get(id)!;
+  }
+
   releaseName(id: string): Session {
     if (!this.get(id)) throw new SessionError('Session not found', 404);
     this.clearName(id, NOTICES.nameReleased);
@@ -316,9 +327,9 @@ export class SessionStore {
     this.db
       .prepare(
         `UPDATE sessions SET name = ?, name_key = ?, state = 'claimed', person_slug = ?,
-           claim_code = NULL, claim_person_slug = NULL, notice = NULL WHERE id = ?`,
+           claim_code = NULL, claim_person_slug = NULL, notice = NULL, persona_id = COALESCE(?, persona_id) WHERE id = ?`,
       )
-      .run(person.name, key, person.slug, id);
+      .run(person.name, key, person.slug, person.persona, id);
     return this.get(id)!;
   }
 

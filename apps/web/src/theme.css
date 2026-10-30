@@ -23,6 +23,10 @@
   --color-claim-text: #ffd27a;
   --color-gate-bg: #2a2320;
   --color-gate-border: rgba(255, 210, 122, 0.25);
+  /* SadGPT teal, a shade darker than the tee's #10a37f so white text on it passes 4.5:1 (5.3:1). */
+  --color-brand: #0b7a5e;
+  --color-brand-text: #ffffff;
+  --color-brand-soft: rgba(16, 163, 127, 0.18);
 
   /* Typography */
   --font-family: ui-sans-serif, -apple-system, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

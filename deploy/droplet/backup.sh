@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hourly backup (cron, see setup.sh): a consistent SQLite snapshot plus people/
-# and photos/, into $APP_ROOT/backups/<timestamp>/. Unchanged photo files are
+# Hourly backup (cron, see setup.sh): a consistent SQLite snapshot plus people/,
+# photos/ and personas/, into $APP_ROOT/backups/<timestamp>/. Unchanged photo files are
 # hard-linked to the previous backup, so hourly copies cost almost no space.
 set -euo pipefail
 
@@ -23,7 +23,7 @@ if [[ -f $APP_ROOT/db/ipsengpt.sqlite ]]; then
   [[ $(sqlite3 "$tmp/ipsengpt.sqlite" 'PRAGMA integrity_check') == ok ]] || { echo "backup failed integrity check" >&2; exit 1; }
 fi
 
-for dir in people photos; do
+for dir in people photos personas; do
   [[ -d $APP_ROOT/$dir ]] || continue
   link=()
   [[ -d $LATEST/$dir ]] && link=(--link-dest "$LATEST/$dir")

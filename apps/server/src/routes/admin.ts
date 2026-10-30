@@ -5,6 +5,8 @@ import type { GateDef } from '../gateDefs.js';
 import { GateError, type Gate } from '../gates.js';
 import { allow, clientIp } from '../http.js';
 import { PeopleError, type Person } from '../people.js';
+import { PersonaError } from '../personas.js';
+import { PointsError, type Reward } from '../points.js';
 import type { PhotoAttempt } from '../photos.js';
 import { SessionError, type Session } from '../sessions.js';
 import type { Services } from '../services.js';
@@ -28,15 +30,45 @@ const ForceBody = z
   })
   .refine((b) => !!b.sessionId !== !!b.all, 'Pick one session or everyone')
   .refine((b) => !!b.key !== !!b.custom, 'Pick a gate or describe a custom one');
+const PersonaId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/);
 const PersonBody = z.object({
   name: z.string().max(200),
   aliases: z.array(z.string().max(200)).max(50).default([]),
   info: z.string().max(20_000).default(''),
+  /** Omitted: unchanged. null: the global persona. */
+  persona: PersonaId.nullable().optional(),
+  /** A persona written just for them. Omitted: unchanged. Empty or null: none. */
+  customPersona: z.string().max(50_000).nullable().optional(),
 });
+const PersonaBody = z.object({ id: PersonaId.nullable() });
+const PersonaEdit = z.object({
+  name: z.string().max(200),
+  description: z.string().max(1000).default(''),
+  body: z.string().max(50_000),
+});
+const RulesBody = z.object({ text: z.string().max(50_000) });
+const AwardBody = z.object({
+  sessionId: z.string().min(1),
+  amount: z.number().int().min(-10_000).max(10_000),
+  reason: z.string().max(200),
+});
+const RewardBody = z.object({
+  threshold: z.number().int().positive().max(1_000_000),
+  prize: z.string().max(200),
+  revealed: z.boolean().default(false),
+});
+// No defaults here: a field left out stays as it is (editing the text must not hide a revealed prize).
+const RewardPatch = z
+  .object({
+    threshold: z.number().int().positive().max(1_000_000).optional(),
+    prize: z.string().max(200).optional(),
+    revealed: z.boolean().optional(),
+  })
+  .refine((b) => Object.values(b).some((v) => v !== undefined), 'Nothing to change');
 
 export function adminRouter(config: Config, services: Services): Router {
   const router = Router();
-  const { adminAuth, sessions, people, limiter, llm, settings, errors, gates, gateDefs, photos, events } = services;
+  const { adminAuth, sessions, people, limiter, llm, settings, errors, gates, gateDefs, photos, events, personas, points, pushScores } = services;
 
   const personName = (slug: string | null) => (slug ? (people.get(slug)?.name ?? `${slug} (deleted)`) : null);
 
@@ -45,13 +77,20 @@ export function adminRouter(config: Config, services: Services): Router {
     name: s.name,
     state: s.state,
     claimCode: s.claimCode,
-    person: s.personSlug ? { slug: s.personSlug, name: personName(s.personSlug) } : null,
+    person: s.personSlug
+      ? { slug: s.personSlug, name: personName(s.personSlug), hasCustomPersona: !!people.get(s.personSlug)?.customPersona }
+      : null,
     claimPerson: s.claimPersonSlug ? { slug: s.claimPersonSlug, name: personName(s.claimPersonSlug) } : null,
     notice: s.notice,
+    /** null: the global persona. */
+    personaId: s.personaId,
+    points: points.total(s.id),
     createdAt: s.createdAt,
     lastSeenAt: s.lastSeenAt,
     messageCount: s.messageCount,
   });
+
+  const rewardSummary = (r: Reward) => ({ ...r });
 
   const personView = (p: Person) => ({
     ...p,
@@ -117,7 +156,13 @@ export function adminRouter(config: Config, services: Services): Router {
       const result = fn();
       res.json(result ?? { ok: true });
     } catch (err) {
-      if (err instanceof SessionError || err instanceof PeopleError || err instanceof GateError) {
+      if (
+        err instanceof SessionError ||
+        err instanceof PeopleError ||
+        err instanceof GateError ||
+        err instanceof PersonaError ||
+        err instanceof PointsError
+      ) {
         res.status(err.status).json({ error: err.message });
         return;
       }
@@ -166,6 +211,7 @@ export function adminRouter(config: Config, services: Services): Router {
     handle(res, () => {
       const s = sessions.approveClaim(req.params.id);
       gates.personAttached(s.id, s.personSlug!);
+      pushScores(); // the leaderboard shows the new name
       return { session: sessionSummary(s) };
     }),
   );
@@ -203,15 +249,154 @@ export function adminRouter(config: Config, services: Services): Router {
     handle(res, () => {
       const s = sessions.assignPerson(req.params.id, body.data.slug);
       gates.personAttached(s.id, s.personSlug!);
+      pushScores();
       return { session: sessionSummary(s) };
     });
   });
 
   router.post('/sessions/:id/release-name', (req, res) =>
-    handle(res, () => ({ session: sessionSummary(sessions.releaseName(req.params.id)) })),
+    handle(res, () => {
+      const s = sessions.releaseName(req.params.id);
+      pushScores(); // nameless guests leave the leaderboard
+      return { session: sessionSummary(s) };
+    }),
   );
 
-  router.post('/sessions/:id/end', (req, res) => handle(res, () => sessions.end(req.params.id)));
+  router.post('/sessions/:id/end', (req, res) =>
+    handle(res, () => {
+      sessions.end(req.params.id);
+      pushScores();
+    }),
+  );
+
+  /** This guest's own persona; `id: null` puts them back on the global one. */
+  router.put('/sessions/:id/persona', (req, res) => {
+    const body = PersonaBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: 'Pick a persona' });
+      return;
+    }
+    handle(res, () => {
+      if (body.data.id !== null && !personas.get(body.data.id)) throw new PersonaError('No such persona.', 404);
+      return { session: sessionSummary(sessions.setPersona(req.params.id, body.data.id)) };
+    });
+  });
+
+  // --- Personas -------------------------------------------------------------
+
+  router.get('/personas', (_req, res) => {
+    const { personas: list, errors: loadErrors } = personas.load();
+    const ids = new Set(list.map((p) => p.id));
+    res.json({
+      personas: list.map(({ id, name, description }) => ({ id, name, description })),
+      errors: loadErrors,
+      activeId: personas.activeId(),
+      defaultId: config.chat.defaultPersona,
+      /** The shipped personas; `inUse`: one with that id exists (so it can be reset). */
+      defaults: personas.defaults().map(({ id, name, description }) => ({ id, name, description, inUse: ids.has(id) })),
+    });
+  });
+
+  router.get('/personas/rules', (_req, res) => {
+    res.json({ text: personas.rules() });
+  });
+
+  router.put('/personas/rules', (req, res) => {
+    const body = RulesBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: 'Invalid rules' });
+      return;
+    }
+    handle(res, () => ({ text: personas.saveRules(body.data.text) }));
+  });
+
+  router.get('/personas/:id', (req, res) =>
+    handle(res, () => {
+      const p = personas.get(req.params.id);
+      if (!p) throw new PersonaError('No such persona.', 404);
+      return { persona: p, hasDefault: personas.defaults().some((d) => d.id === p.id) };
+    }),
+  );
+
+  router.post('/personas', (req, res) => {
+    const body = PersonaEdit.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: 'Invalid persona' });
+      return;
+    }
+    handle(res, () => ({ persona: personas.save(body.data) }));
+  });
+
+  /** The global persona; `id: null` goes back to the configured default. */
+  router.put('/personas/active', (req, res) => {
+    const body = PersonaBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: 'Pick a persona' });
+      return;
+    }
+    handle(res, () => {
+      personas.setActive(body.data.id);
+      return { activeId: personas.activeId() };
+    });
+  });
+
+  // After /personas/active and /personas/rules, so those paths aren't taken as ids.
+  router.put('/personas/:id', (req, res) => {
+    const body = PersonaEdit.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: 'Invalid persona' });
+      return;
+    }
+    handle(res, () => ({ persona: personas.save(body.data, req.params.id) }));
+  });
+
+  router.delete('/personas/:id', (req, res) => handle(res, () => personas.delete(req.params.id)));
+
+  /** Puts back (or adds) the shipped version of a default persona. */
+  router.post('/personas/:id/restore', (req, res) => handle(res, () => ({ persona: personas.restoreDefault(req.params.id) })));
+
+  // --- Points & rewards -----------------------------------------------------
+
+  router.get('/points', (_req, res) => {
+    res.json({ leaderboard: points.leaderboard(), rewards: points.rewards().map(rewardSummary), recent: points.recent(50) });
+  });
+
+  /** Gives (or with a negative amount, takes) points, with a reason the guest sees. */
+  router.post('/points', (req, res) => {
+    const body = AwardBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: body.error.issues[0]?.message ?? 'Invalid request' });
+      return;
+    }
+    handle(res, () => {
+      const s = sessions.get(body.data.sessionId);
+      if (!s) throw new PointsError('Session not found', 404);
+      const entry = points.award(s.id, body.data.amount, body.data.reason, 'admin');
+      events.toSession(s.id, 'points_awarded', { amount: entry.amount, reason: entry.reason });
+      return { entry, total: points.total(s.id) };
+    });
+  });
+
+  router.post('/rewards', (req, res) => {
+    const body = RewardBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: body.error.issues[0]?.message ?? 'Invalid reward' });
+      return;
+    }
+    handle(res, () => ({ reward: rewardSummary(points.addReward(body.data)) }));
+  });
+
+  /** Edit a reward, or show/hide its prize with `{ revealed }`. */
+  router.patch('/rewards/:id', (req, res) => {
+    const body = RewardPatch.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: body.error.issues[0]?.message ?? 'Invalid reward' });
+      return;
+    }
+    handle(res, () => ({ reward: rewardSummary(points.updateReward(req.params.id, body.data)) }));
+  });
+
+  router.delete('/rewards/:id', (req, res) => handle(res, () => points.deleteReward(req.params.id)));
 
   // --- Gates ----------------------------------------------------------------
 
@@ -313,13 +498,20 @@ export function adminRouter(config: Config, services: Services): Router {
     res.json({ people: people.list().map(personView), errors: people.errors });
   });
 
+  const checkPersona = (id: string | null | undefined) => {
+    if (id && !personas.get(id)) throw new PersonaError('No such persona.', 404);
+  };
+
   router.post('/people', (req, res) => {
     const body = PersonBody.safeParse(req.body);
     if (!body.success) {
       res.status(400).json({ error: 'Invalid person' });
       return;
     }
-    handle(res, () => ({ person: personView(people.save(body.data)) }));
+    handle(res, () => {
+      checkPersona(body.data.persona);
+      return { person: personView(people.save(body.data)) };
+    });
   });
 
   router.put('/people/:slug', (req, res) => {
@@ -329,6 +521,7 @@ export function adminRouter(config: Config, services: Services): Router {
       return;
     }
     handle(res, () => {
+      checkPersona(body.data.persona);
       const saved = people.save(body.data, req.params.slug);
       sessions.personUpdated(saved);
       return { person: personView(saved) };

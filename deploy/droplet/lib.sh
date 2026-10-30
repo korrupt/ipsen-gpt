@@ -129,13 +129,13 @@ install_docker() {
 
 setup_dirs() { # [admin user who deploys]
   install -d -m 755 "$APP_ROOT" "$APP_ROOT/app" "$APP_ROOT/app/content"
-  install -d -m 750 -o "$APP_UID" -g "$APP_UID" "$APP_ROOT/db" "$APP_ROOT/people" "$APP_ROOT/photos"
+  install -d -m 750 -o "$APP_UID" -g "$APP_UID" "$APP_ROOT/db" "$APP_ROOT/people" "$APP_ROOT/photos" "$APP_ROOT/personas"
   install -d -m 700 "$APP_ROOT/backups"
   if [[ -n ${1:-} ]]; then
     chown -R "$1:$1" "$APP_ROOT/app"
     usermod -aG docker "$1" 2>/dev/null || true
   fi
-  log "dirs: data in $APP_ROOT/{db,people,photos}, backups in $APP_ROOT/backups"
+  log "dirs: data in $APP_ROOT/{db,people,photos,personas}, backups in $APP_ROOT/backups"
 }
 
 # Prints the Nginx site for a domain (the template has __DOMAIN__ placeholders).

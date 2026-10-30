@@ -26,7 +26,9 @@ const ConfigSchema = z.object({
   OLLAMA_REPLY_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   OLLAMA_CHECK_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
 
-  PERSONA_PATH: z.string().default('content/persona.md'),
+  PERSONAS_DIR: z.string().default('data/personas'),
+  PERSONAS_SEED_DIR: z.string().default('content/personas'),
+  DEFAULT_PERSONA: z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/).default('sadgpt'),
   CHAT_MAX_INPUT_CHARS: z.coerce.number().int().positive().default(500),
   CHAT_HISTORY_TURNS: z.coerce.number().int().min(0).default(8),
   SSE_HEARTBEAT_MS: z.coerce.number().int().positive().default(20000),
@@ -81,7 +83,12 @@ export interface Config {
     checkIntervalMs: number;
   };
   chat: {
-    personaPath: string;
+    /** Persona files (`<id>.md`) and the shared `_rules.md`; edited in admin, so party data. */
+    personasDir: string;
+    /** The personas shipped with the app: copied into an empty personasDir, and restorable one by one. */
+    personasSeedDir: string;
+    /** Used until the admin picks one, and when a picked one disappears. */
+    defaultPersona: string;
     maxInputChars: number;
     historyTurns: number;
   };
@@ -164,7 +171,9 @@ export function parseConfig(env: Record<string, string | undefined>, baseDir: st
       checkIntervalMs: e.OLLAMA_CHECK_INTERVAL_MS,
     },
     chat: {
-      personaPath: resolve(e.PERSONA_PATH),
+      personasDir: resolve(e.PERSONAS_DIR),
+      personasSeedDir: resolve(e.PERSONAS_SEED_DIR),
+      defaultPersona: e.DEFAULT_PERSONA,
       maxInputChars: e.CHAT_MAX_INPUT_CHARS,
       historyTurns: e.CHAT_HISTORY_TURNS,
     },

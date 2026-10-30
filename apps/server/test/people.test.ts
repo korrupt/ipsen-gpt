@@ -7,7 +7,11 @@ import { tempDir, writePerson } from './helpers.js';
 describe('person files', () => {
   it('round-trip through serialize/parse', () => {
     const p = { name: 'Ola Nordmann', aliases: ['Ola', 'Olsen: the Great'], info: 'Likes *bats*.\n\nHates garlic.' };
-    expect(parsePersonFile('ola', serializePerson(p))).toEqual({ slug: 'ola', ...p });
+    expect(parsePersonFile('ola', serializePerson(p))).toEqual({ slug: 'ola', ...p, persona: null, customPersona: null });
+    const withPersona = { ...p, persona: 'heartbroken' };
+    expect(serializePerson(withPersona)).toContain('persona: heartbroken');
+    expect(parsePersonFile('ola', serializePerson(withPersona))).toEqual({ slug: 'ola', ...withPersona, customPersona: null });
+    expect(() => parsePersonFile('x', '---\nname: X\npersona: Not An Id\n---\nbody')).toThrow(/persona/);
   });
 
   it('rejects files without valid frontmatter', () => {

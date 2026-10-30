@@ -37,7 +37,7 @@ out=$(docker run --rm -v "$DEPLOY_DIR/droplet:/setup:ro" -e PUB="$PUB" ubuntu:24
   echo "tunnel_keys=$(grep -c . /home/tunnel/.ssh/authorized_keys)"
   sshd -t && echo "sshd_t=ok"
   sshd -T -C user=tunnel,host=x,addr=1.2.3.4 | grep -iE "^(permitlisten|allowtcpforwarding|passwordauthentication|gatewayports) " | tr "\n" ";"; echo
-  echo "dirs=$(stat -c "%n:%u:%a" /srv/ipsengpt/db /srv/ipsengpt/people /srv/ipsengpt/photos | tr "\n" " ")"
+  echo "dirs=$(stat -c "%n:%u:%a" /srv/ipsengpt/db /srv/ipsengpt/people /srv/ipsengpt/photos /srv/ipsengpt/personas | tr "\n" " ")"
   echo "appdir_owner=$(stat -c %U /srv/ipsengpt/app)"
   echo "site=$(readlink /etc/nginx/sites-enabled/ipsengpt) default=$([[ -e /etc/nginx/sites-enabled/default ]] && echo present || echo removed)"
   nginx -t 2>/dev/null && echo "nginx_t=ok"
@@ -64,7 +64,7 @@ assert_contains "$out" "permitlisten 127.0.0.1:11435" "effective sshd config for
 assert_contains "$out" "allowtcpforwarding remote" "effective sshd config for tunnel: remote forwarding only"
 assert_contains "$out" "passwordauthentication no" "effective sshd config: no passwords"
 assert_contains "$out" "gatewayports no" "effective sshd config: GatewayPorts no"
-assert_contains "$out" "/srv/ipsengpt/db:1000:750 /srv/ipsengpt/people:1000:750 /srv/ipsengpt/photos:1000:750" \
+assert_contains "$out" "/srv/ipsengpt/db:1000:750 /srv/ipsengpt/people:1000:750 /srv/ipsengpt/photos:1000:750 /srv/ipsengpt/personas:1000:750" \
   "data dirs owned by the container's node user"
 assert_contains "$out" "appdir_owner=ghost" "admin user owns the app dir (for deploys)"
 assert_contains "$out" "site=/etc/nginx/sites-available/ipsengpt default=removed" "nginx site enabled, default removed"

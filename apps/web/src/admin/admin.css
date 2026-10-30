@@ -443,7 +443,8 @@ a.btn {
   border: 0;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 13px;
+  /* Seven tabs share a 375 px phone: about 53 px each. */
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   position: relative;
@@ -455,7 +456,7 @@ a.btn {
 }
 
 .admin-nav__badge {
-  /* Six tabs share a phone's width: the count sits on the tab's corner. */
+  /* Tabs are narrow on a phone: the count sits on the tab's corner. */
   position: absolute;
   top: 8px;
   right: 4px;

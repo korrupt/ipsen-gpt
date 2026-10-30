@@ -1,7 +1,7 @@
-# Project status: IpsenGPT
+# Project status: SadGPT (formerly IpsenGPT)
 
 Handover notes for the next agent. Read with [PLAN.md](PLAN.md) (the spec), [CLAUDE.md](CLAUDE.md)
-(working rules) and [README.md](README.md) (how to run and deploy). Last updated 2026-10-26.
+(working rules) and [README.md](README.md) (how to run and deploy). Last updated 2026-10-30.
 
 ## Working rules (from the user)
 
@@ -18,22 +18,47 @@ Handover notes for the next agent. Read with [PLAN.md](PLAN.md) (the spec), [CLA
 | --- | --- | --- |
 | 1. Core chat | done | `2a65cc9` |
 | 2. Sessions & identity | done | `a21c5cf` |
-| 3. Deployment | done locally; **not yet deployed to the real droplet** | `4be013c`, `ce13778`, `c7fb9ad` |
-| 4. Photo gates | **built, waiting for the user's test**; accuracy on the 8b not measured yet (GPU was busy) | uncommitted |
-| 5. Curses + live events | not started | |
-| 6. Secrets game | not started (design must be confirmed by the user first) | |
-| 7. Hardening & load tests | not started | |
-| 8. Skin pass | not started | |
+| 3. Deployment | done; **live at https://chat.ipsen.no**, verified through Cloudflare on 2026-10-27 (smoke test 24/24) | `4be013c`, `ce13778`, `c7fb9ad`, `a529ad7` |
+| 4. Photo gates | done; accuracy on the 8b **not measured yet** (needs real photos from the user) | `04e1532` |
+| 5. SadGPT, leaderboard & points (new, 2026-10-30) | **built** (incl. persona editing in admin and per-person personas); waiting for the user's test and a deploy | uncommitted |
+| 6. Curses + live events | live events done (`status`, `gate`, scores); **curses not started** | `47c9301` |
+| 7. Secrets game | not started (design must be confirmed by the user first) | |
+| 8. Hardening & load tests | load test against the 8b done (see below); the rest not started | |
+| 9. Skin pass | not started (the rebrand already uses the tee's logo and teal) | |
 
-Gates at last run (2026-10-26, native Linux, after the switch to `chat.ipsen.no`): `pnpm check` passes
-(typecheck, 199 server + 49 web tests, build) and `pnpm test:deploy` passes (all 7 suites, Phase 4 changes included).
+Gates at last run (2026-10-30, native Linux dev PC, Phase 5): `pnpm check` passes (typecheck, 247 server +
+70 web tests, build) and `pnpm test:deploy` passes (all 7 suites; last run before the per-person persona, which
+touched no deploy files). Check with the user that `47c9301` (no
+fallback, live events) is deployed: it needs `OLLAMA_FIRST_TOKEN_TIMEOUT_MS=45000` in the droplet's `.env`.
 
 ## Decisions made with the user
 
 - **Monorepo:** pnpm workspaces (pnpm 11), `apps/server` (Express 5 + TS) and `apps/web`
   (React 19 + Vite 8; guest app at `/`, admin at `/admin/` as a second Vite entry).
-- **Persona** (`content/persona.md`) is a placeholder written by the agent (an LLM that died in a
-  server-room fire); the user will rewrite it. It's re-read on every message.
+- **Rebranded to SadGPT** (2026-10-30), a sad emo chatbot, to match the user's costume tee (Claude Design
+  artifact "SadGPT Halloween Tee", https://claude.ai/artifact/GpUxipLJisr8PkFPBJBk7g). Portrait/favicon =
+  the tee's logo (sad chat bubble, emo fringe, tear) on teal. Guest-facing copy is in SadGPT's voice.
+  Internal names (repo, `@ipsengpt/*` packages, `/srv/ipsengpt`, image `ipsengpt`, token key) are unchanged.
+- **Personas** are edited in Admin → System (create, edit, delete to `.trash/`, reset/add shipped defaults,
+  shared rules). They live in `PERSONAS_DIR` (`data/personas`; `/srv/ipsengpt/personas` volume in production),
+  seeded on first start from `PERSONAS_SEED_DIR` (`content/personas`; `/app/personas-default` in the image,
+  outside the read-only `./content` mount). Deploys never touch them. Shipped: six SadGPT variants written by
+  the agent (sadgpt = default emo, heartbroken, nihilist, goth-poet, sulky, drama). Ids `active` and `rules`
+  are reserved (admin routes).
+  `_rules.md` comes first in every prompt (language rule first, now English-only, see below; safety: sadness is comic, never real despair,
+  "you can't give points"). Resolution: session's own (Admin → Sessions) > global (Admin → System,
+  `settings.personaId`) > `DEFAULT_PERSONA`. A person's `persona:` in `person.md` is applied on claim approval/assign
+  (`COALESCE`, so it doesn't override one set by hand). A person can instead have a **custom persona** written just
+  for them (`people/<slug>/persona.md`, Admin → People "Custom"), used in their claimed session when the
+  session has no persona picked; setting one clears their listed `persona`.
+- **Points (Phase 5), decided with the user:** a ledger (`points` table). Sources for now: passed photo gates
+  (once per gate, `gate_id` unique) and admin give/take with a reason (the guest gets a notice). Further
+  sources are **still to be decided**. Leaderboard = named, live sessions with points; ties go to whoever got
+  there first. Guests see top 10 + their own place.
+- **Rewards:** only "first to N points" (the user's pick). Won automatically, for good (taking points away
+  doesn't undo it), computed from ledger history so a late reward goes to whoever reached N first. Each
+  reward has its own show/hide prize switch; hidden prizes are `null` in every guest payload. The goal
+  can't change once won.
 - **Reserved names:** several guests may claim the same person in parallel. Approving one
   renames that session to the person's display name; the other claimants get a notice and must
   pick a new name.
@@ -53,7 +78,7 @@ Gates at last run (2026-10-26, native Linux, after the switch to `chat.ipsen.no`
   silent health check (3 s) during a request closes chat at once. A busy PC (no first token within
   45 s) only fails that reply. Photos are still verified while paused.
 - **Pause chat:** admin → System, with a custom reason guests see (`settings.pauseReason`, survives restarts).
-- **Live events built early** (Phase 5's stream): `GET /api/events` sends `status` and `gate` snapshots
+- **Live events built early** (Phase 6's stream): `GET /api/events` sends `status` and `gate` snapshots
   on connect and on every change (`events.ts` EventHub; `GateStore.onChange`, `Llm.onStatusChange`).
   The client uses fetch (token in a header, not the URL) and reconnects with backoff.
 - **Gates show up immediately:** forced/timed/expired gates are pushed live; `after_messages` gates fire
@@ -81,22 +106,83 @@ Gates at last run (2026-10-26, native Linux, after the switch to `chat.ipsen.no`
 
 ## Open items and pending confirmations
 
-- **Phase 4 still to do (needs the GPU):** measure gate accuracy on the **8b** with real photos
-  (right object, wrong object, a photo of a screen showing the object, the word written on paper).
-  Tune `PHOTO_CONFIDENCE_MIN` (0.7) from that.
-- **WSL setup the user still has to do** (needs sudo): run `deploy/pc/setup-ollama.sh qwen3-vl:8b-instruct`
-  after gaming (it pins 5.8 GB of VRAM); install Docker Engine for `pnpm test:deploy`; create `.env`.
-- A gate forced while a guest is idle only shows up on their next message or page load. Phase 5's
-  SSE events should push it (and the countdown of a `timed_global` gate).
-- `SSE_ROUTES` in `apps/server/src/sse.ts` lists `/api/events` for Phase 5. Nginx already has an
-  unbuffered location for it.
-- The guest page polls `/api/session` every 5 s while a claim is pending; Phase 5's SSE events
-  should replace that.
-- Points are stored per gate (`gates.points`, status `passed`) but nothing sums them yet (Phase 6).
+- **Phase 5 needs the user's test**, then a deploy. The deploy creates `/srv/ipsengpt/personas` (sudo) and the
+  app seeds it; the old `content/persona.md` on the droplet is unused and can be deleted.
+- **How guests earn points** beyond gates and admin awards is still open.
+- **Language: SadGPT is English-only** (the user's edit of `content/personas/_rules.md`, 2026-10-30: reply in
+  English and, if asked for another language, refuse because English is "cooler and more emo"). The Norwegian
+  test below is kept only in case that changes. The fixed lines (gate demands, refusals) are English too.
+  The edited rules ship as the default: they reach `data/personas` on first start (none locally yet) and the
+  droplet's `/srv/ipsengpt/personas` on the first deploy. After that, edit them in Admin → System → Shared rules.
+- **Photo-gate accuracy on the 8b:** still to measure with real photos (right object, wrong object,
+  a photo of a screen showing the object, the word written on paper). Tune `PHOTO_CONFIDENCE_MIN` (0.7) from that.
+- **Gate triggers:** the examples in `content/gates.json` are all `admin_forced`; the user hasn't picked real ones.
+- The guest page polls `/api/session` every 5 s while a claim is pending; move that onto `/api/events`
+  (a `session` event) in Phase 6.
 - PLAN.md open questions still open: character voice, gate targets and triggers, person-file
   content, secrets game design.
-- Real-droplet verification (README "Deployment → 4. Verify") hasn't happened yet. Nothing has
-  been tested through Cloudflare.
+
+## Norwegian replies (superseded: SadGPT is English-only since 2026-10-30)
+
+The user reported that IpsenGPT wouldn't switch to Norwegian. Measured on 2026-10-30 against
+`qwen3-vl:8b-instruct` on the gaming PC (temperature 0.8, `think: false`, 2 tries per message), with
+the placeholder persona whose **last** rule is "Reply in the same language the guest writes in":
+
+| Chat so far | Then the guest writes | Placeholder persona | With the fix below |
+| --- | --- | --- | --- |
+| nothing (fresh chat) | Norwegian | 6/6 Norwegian | 6/6 |
+| one English exchange | Norwegian | 3–4/6 Norwegian | 6/6 |
+| English exchange + the app's fixed lines (a refusal line, "The spirits accept your offering…") | Norwegian | **1/6** Norwegian | 6/6 |
+| one Norwegian exchange | English | not measured | 4/6 English |
+
+**Cause:** the model follows the language of the chat history over a rule at the end of the system
+prompt. Every fixed line the app writes is English (gate demands, refusal lines, `VERDICT_LINES`,
+`DEFAULT_REFUSALS`), so after a gate the history pulls replies into English. The persona's English
+examples, like "(the fans are whispering again)", also show up as English asides in Norwegian replies.
+
+**The fix that was tested** (not built; the user chose to fold it into the persona rewrite):
+1. The language rule **first** in the system prompt: "Always reply in the language of the guest's latest
+   message. If they write Norwegian, reply in natural Norwegian (bokmål), even if earlier messages in
+   the chat were in English."
+2. A one-line **system message right before the guest's message**: "Reply in the same language as the
+   guest's next message (Norwegian or English)." Placed last, it outweighs the history.
+
+Suggested: build both in `prompt.ts` (not `persona.md`) so they survive persona edits and also apply
+to model-made refusals during gates. **Open weak spot:** the reminder pushes slightly toward Norwegian
+("Tell me a scary story." after a Norwegian chat got Norwegian twice). Tune its wording and re-run all
+four rows before shipping. Optionally add "asides too" for the English asides, and Norwegian versions
+of the fixed lines.
+
+**How to run it:** send the app's real prompt (persona + "## The guest" section + history) straight to
+Ollama `/api/chat`, with `stream: false`, `num_ctx: 4096`. Messages used: "Hei! Hvem er du egentlig?",
+"Hva synes du om kostymet mitt?", "Kan du fortelle meg en skummel historie?" (and English equivalents
+for the last row). Count a reply as Norwegian by æ/ø/å and common words (jeg, du, er, ikke, og, det …).
+Run it in the background with a per-request timeout; the 8b answers in ~1–2 s.
+
+## Load test (2026-10-30, Phase 8)
+
+N guests sending at the same instant, straight to `qwen3-vl:8b-instruct` on the gaming PC through the
+tunnel, each with the real persona and 3 turns of history:
+
+| Guests at once | Median first word | Slowest first word | All replies done |
+| --- | --- | --- | --- |
+| 10 | 1.7 s | 3.1 s | 3.3 s |
+| 20 | 3.5 s | 6.6 s | 6.9 s |
+| 30 | 5.1 s | 9.7 s | 10.0 s |
+
+No errors and nobody near the 45 s first-token limit; replies averaged ~24 tokens (the "1–3 sentences"
+rule keeps it fast). Single reply: first token 0.45 s, 74 tok/s. **Not covered yet:** photo
+verification competing with chat, 8-turn histories, and the full path through Cloudflare and the app.
+
+## Reaching the gaming PC's model from the dev PC (dev only)
+
+While `deploy/pc/tunnel.sh` runs on the gaming PC, the user runs this on the dev PC (the agent doesn't
+SSH to the droplet itself):
+```bash
+ssh -N -L 11435:127.0.0.1:11435 ipsen.no
+```
+Then `http://127.0.0.1:11435` on the dev PC is the gaming PC's Ollama, through the real tunnel. Nothing
+is opened on the gaming PC or the LAN (Ollama has no auth; don't expose it on party Wi-Fi).
 
 ## Moving to WSL2 (new environment)
 
@@ -128,6 +214,9 @@ The repo was developed on **native Ubuntu**. Things to check after cloning into 
 
 To see chat close and reopen locally: `pnpm dev:mock`, then stop and restart the mock process.
 
+`.claude/launch.json` (for the desktop app's browser preview) runs the mock model, the server and Vite
+separately. Admin is off in it unless the dev `.env` has `ADMIN_PASSWORD`.
+
 ## Code map
 
 ```
@@ -136,8 +225,10 @@ apps/server/src/
   config.ts                       all .env parsing (zod); relative paths resolve against the .env dir
   ollama.ts                       streamChat: NDJSON streaming, health check + timeouts
   llm.ts                          the one model: chat/vision, 5 s checks, open/closed status, pause, probe()
+  personas.ts                     PersonaStore: data/personas/*.md (seeded, editable), _rules.md first, session > global > default
+  points.ts                       PointsStore: ledger, leaderboard, "first to N" rewards (settled from ledger history)
   events.ts                       EventHub: live events to guests' /api/events streams
-  prompt.ts                       persona + extra system sections + trimmed history
+  prompt.ts                       system prompt + extra sections + trimmed history
   gateDefs.ts                     gates.json parsing (global + per person), re-read on every use
   gates.ts                        GateStore: triggers, force/cancel, expiry, timed gates; only it sets passed
   photos.ts                       magic-byte check, sharp resize/EXIF strip, PhotoStore (attempt records + files)
@@ -156,7 +247,8 @@ apps/server/src/
 apps/server/test/                 vitest + supertest; helpers.ts has makeEnv (in-memory DB, fake clock)
 apps/web/src/                     guest app (App.tsx, components/, lib/sse.ts parser, lib/session.ts,
                                   components/GatePanel.tsx + lib/photos.ts for the photo flow)
-apps/web/src/admin/               admin app: Claims, Sessions, Gates, Photos, People, System tabs
+apps/web/src/admin/               admin app: Claims, Sessions, Points, Gates, Photos, People, System tabs
+                                  (PersonaSelect.tsx: persona picker; PersonasEditor.tsx: editing, in System)
 deploy/                           compose, env template, deploy.sh, droplet/ (setup, nginx, sshd,
                                   backup), pc/ (setup-ollama, tunnel), test/ (Docker test suites)
 ```
@@ -181,6 +273,10 @@ deploy/                           compose, env template, deploy.sh, droplet/ (se
   It *can* decode SVG/GIF/TIFF, so the magic-byte check is what keeps those out.
 - A per-session "one at a time" guard must be taken before the request body is read, or two
   uploads sent together both get in (`gateFlow.test.ts` stalls one upload mid-body to prove it).
+- `cmd | grep -q x` fails under `set -o pipefail` when `cmd` streams: grep exits on the first match,
+  curl gets SIGPIPE, and the pipeline reports failure. Capture first: `grep -q x <<<"$(cmd)"`.
+  (`test-compose.sh` looped until the rate limit because of this.)
+- Old `.env` keys are harmless: zod drops unknown keys, so removed settings (`OLLAMA_FALLBACK_*`) are ignored.
 - Verify that tests actually bite: several deploy tests passed for the wrong reason (header-only
   timing, `timeout` exit codes, case-sensitive header checks) until mutation-checked. When adding a
   safety test, temporarily break the code and confirm the test fails.

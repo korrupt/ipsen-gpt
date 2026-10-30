@@ -130,6 +130,16 @@ describe('people', () => {
         created = body;
         return json({ person: { slug: 'kari', ...body, claimedBy: null } });
       },
+      'GET /api/admin/personas': () =>
+        json({
+          personas: [
+            { id: 'sadgpt', name: 'Emo SadGPT', description: '' },
+            { id: 'nihilist', name: 'Nihilist SadGPT', description: '' },
+          ],
+          errors: [],
+          activeId: 'sadgpt',
+          defaultId: 'sadgpt',
+        }),
     });
     render(<AdminApp />);
     await userEvent.click(await screen.findByRole('button', { name: /^people$/i }));
@@ -142,10 +152,13 @@ describe('people', () => {
     await userEvent.clear(screen.getByLabelText('Display name'));
     await userEvent.type(screen.getByLabelText('Display name'), 'Kari Nordmann');
     await userEvent.type(screen.getByLabelText(/aliases/i), 'Kari,  KN , ');
-    await userEvent.type(screen.getByLabelText(/info for ipsengpt/i), 'Likes owls.');
+    await userEvent.type(screen.getByLabelText(/info for sadgpt/i), 'Likes owls.');
+    const persona = screen.getByLabelText(/persona once you approve them/i);
+    expect((await screen.findByRole('option', { name: 'Global persona (now: Emo SadGPT)' })).tagName).toBe('OPTION');
+    await userEvent.selectOptions(persona, 'Nihilist SadGPT');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('button', { name: '+ New person' });
-    expect(created).toEqual({ name: 'Kari Nordmann', aliases: ['Kari', 'KN'], info: 'Likes owls.' });
+    expect(created).toEqual({ name: 'Kari Nordmann', aliases: ['Kari', 'KN'], info: 'Likes owls.', persona: 'nihilist', customPersona: null });
   });
 });
 
@@ -174,7 +187,7 @@ describe('system', () => {
       'GET /api/admin/system': () =>
         json({
           model: model({ reachable: false, hasModel: false, error: 'fetch failed' }),
-          status: { open: false, reason: 'disconnected', message: 'IpsenGPT has lost contact.' },
+          status: { open: false, reason: 'disconnected', message: 'SadGPT has lost contact.' },
           pauseReason: null,
           listeners: 3,
           errors: [{ at: Date.now(), message: 'Model check failed, chat closed: fetch failed', detail: '' }],
@@ -185,7 +198,7 @@ describe('system', () => {
     const card = await screen.findByTestId('model');
     expect(card.textContent).toContain('Disconnected');
     expect(card.textContent).toContain('fetch failed');
-    expect(screen.getByTestId('guest-view').textContent).toMatch(/Chat is closed\. Guests see: “IpsenGPT has lost contact\.” 3 pages open/);
+    expect(screen.getByTestId('guest-view').textContent).toMatch(/Chat is closed\. Guests see: “SadGPT has lost contact\.” 3 pages open/);
     expect(screen.getByText('Model check failed, chat closed: fetch failed')).toBeTruthy();
   });
 
@@ -223,5 +236,271 @@ describe('system', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Resume chat' }));
     expect(await screen.findByLabelText('Pause chat for everyone')).toBeTruthy();
     expect(screen.getByTestId('guest-view').textContent).toMatch(/^Guests can chat\./);
+  });
+});
+
+const PERSONAS = {
+  personas: [
+    { id: 'drama', name: 'Dramatic SadGPT', description: 'Theatre kid' },
+    { id: 'sadgpt', name: 'Emo SadGPT', description: 'The default' },
+  ],
+  errors: [],
+  activeId: 'sadgpt',
+  defaultId: 'sadgpt',
+  defaults: [
+    { id: 'sadgpt', name: 'Emo SadGPT', description: 'The default', inUse: true },
+    { id: 'nihilist', name: 'Nihilist SadGPT', description: '', inUse: false },
+  ],
+};
+const KARI = {
+  id: 's1',
+  name: 'Kari',
+  state: 'guest',
+  claimCode: null,
+  person: null,
+  claimPerson: null,
+  notice: null,
+  personaId: null,
+  points: 12,
+  createdAt: Date.now(),
+  lastSeenAt: Date.now(),
+  messageCount: 3,
+};
+const bodyOf = (fetch: ReturnType<typeof loggedIn>, method: string, url: string) =>
+  JSON.parse(fetch.mock.calls.findLast(([u, init]) => u === url && init.method === method)![1].body as string);
+
+describe('points', () => {
+  it('gives points with a reason, adds a reward with its prize hidden, and shows the prize on demand', async () => {
+    let rewards: object[] = [];
+    const fetch = loggedIn({
+      'GET /api/admin/sessions': () => json({ sessions: [KARI] }),
+      'GET /api/admin/points': () => json({ leaderboard: [{ rank: 1, sessionId: 's1', name: 'Kari', points: 12 }], rewards, recent: [] }),
+      'POST /api/admin/points': () => json({ total: 22 }),
+      'POST /api/admin/rewards': (init) => {
+        const b = JSON.parse(init.body as string);
+        rewards = [{ id: 'r1', ...b, winnerId: null, winnerName: null, wonAt: null, createdAt: Date.now() }];
+        return json({ reward: rewards[0] });
+      },
+      'PATCH /api/admin/rewards/r1': (init) => {
+        rewards = [{ ...rewards[0], ...JSON.parse(init.body as string) }];
+        return json({ reward: rewards[0] });
+      },
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^points$/i }));
+    expect((await screen.findByTestId('admin-leaderboard')).textContent).toContain('1. Kari12');
+
+    const award = screen.getByTestId('award-form');
+    const give = within(award).getByRole('button', { name: 'Give points' });
+    expect(give).toHaveProperty('disabled', true);
+    await userEvent.selectOptions(await within(award).findByLabelText('Guest'), 'Kari (12 pts)');
+    await userEvent.type(within(award).getByLabelText(/^points/i), '10');
+    await userEvent.type(within(award).getByLabelText(/^reason/i), 'Saddest costume');
+    await userEvent.click(give);
+    await screen.findByText('Gave 10 points (now 22)');
+    expect(bodyOf(fetch, 'POST', '/api/admin/points')).toEqual({ sessionId: 's1', amount: 10, reason: 'Saddest costume' });
+
+    const form = screen.getByTestId('reward-form');
+    await userEvent.type(within(form).getByLabelText(/first to/i), '50');
+    await userEvent.type(within(form).getByLabelText(/^prize/i), 'Sad candy');
+    await userEvent.click(within(form).getByRole('button', { name: 'Add reward' }));
+    expect(bodyOf(fetch, 'POST', '/api/admin/rewards')).toEqual({ threshold: 50, prize: 'Sad candy', revealed: false });
+    const card = await screen.findByTestId('reward');
+    expect(card.textContent).toContain('Guests see: ???');
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Show prize' }));
+    expect(bodyOf(fetch, 'PATCH', '/api/admin/rewards/r1')).toEqual({ revealed: true });
+    expect(await within(await screen.findByTestId('reward')).findByText(/Guests see: Sad candy/)).toBeTruthy();
+  });
+
+  it("take points uses a negative number, and the button says so", async () => {
+    loggedIn({
+      'GET /api/admin/sessions': () => json({ sessions: [KARI] }),
+      'GET /api/admin/points': () => json({ leaderboard: [], rewards: [], recent: [] }),
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^points$/i }));
+    const award = await screen.findByTestId('award-form');
+    await userEvent.type(within(award).getByLabelText(/^points/i), '-5');
+    expect(within(award).getByRole('button', { name: 'Take points' })).toBeTruthy();
+  });
+});
+
+describe('personas', () => {
+  it("sets a guest's own persona from their session page", async () => {
+    let session = { ...KARI };
+    const fetch = loggedIn({
+      'GET /api/admin/sessions': () => json({ sessions: [session] }),
+      'GET /api/admin/sessions/s1': () => json({ session, messages: [], gates: [], photos: [] }),
+      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [] }),
+      'GET /api/admin/personas': () => json(PERSONAS),
+      'PUT /api/admin/sessions/s1/persona': (init) => {
+        session = { ...session, personaId: JSON.parse(init.body as string).id };
+        return json({ session });
+      },
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^sessions$/i }));
+    await userEvent.click(await screen.findByTestId('session-row'));
+    expect(await screen.findByText('Points: 12')).toBeTruthy();
+    const select = screen.getByLabelText('Persona for this guest') as HTMLSelectElement;
+    await screen.findByRole('option', { name: 'Dramatic SadGPT' });
+    await userEvent.selectOptions(select, 'Dramatic SadGPT');
+    expect(bodyOf(fetch, 'PUT', '/api/admin/sessions/s1/persona')).toEqual({ id: 'drama' });
+    await waitFor(() => expect(select.value).toBe('drama'));
+  });
+
+  it('switches the global persona from System', async () => {
+    let activeId = 'sadgpt';
+    const fetch = loggedIn({
+      'GET /api/admin/system': () =>
+        json({ model: { url: 'u', model: 'm', reachable: true, hasModel: true, error: null, checkedAt: null }, status: { open: true, reason: null, message: null }, pauseReason: null, listeners: 0, errors: [] }),
+      'GET /api/admin/personas': () => json({ ...PERSONAS, activeId }),
+      'PUT /api/admin/personas/active': (init) => {
+        activeId = JSON.parse(init.body as string).id;
+        return json({ activeId });
+      },
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^system$/i }));
+    const select = (await screen.findByLabelText(/persona for everyone/i)) as HTMLSelectElement;
+    expect(select.value).toBe('sadgpt');
+    expect(screen.getByRole('option', { name: 'Emo SadGPT (default)' })).toBeTruthy();
+    await userEvent.selectOptions(select, 'Dramatic SadGPT');
+    expect(bodyOf(fetch, 'PUT', '/api/admin/personas/active')).toEqual({ id: 'drama' });
+    expect(await within(screen.getByTestId('global-persona')).findByText('Theatre kid')).toBeTruthy();
+  });
+});
+
+describe('persona editing', () => {
+  const SYSTEM = () =>
+    json({ model: { url: 'u', model: 'm', reachable: true, hasModel: true, error: null, checkedAt: null }, status: { open: true, reason: null, message: null }, pauseReason: null, listeners: 0, errors: [] });
+
+  it('edits a persona, resets it to the default, and adds a deleted default back', async () => {
+    const fetch = loggedIn({
+      'GET /api/admin/system': SYSTEM,
+      'GET /api/admin/personas': () => json(PERSONAS),
+      'GET /api/admin/personas/sadgpt': () =>
+        json({ persona: { id: 'sadgpt', name: 'Emo SadGPT', description: 'The default', body: 'You are emo.' }, hasDefault: true }),
+      'PUT /api/admin/personas/sadgpt': (init) => json({ persona: { id: 'sadgpt', ...JSON.parse(init.body as string) } }),
+      'POST /api/admin/personas/sadgpt/restore': () => json({ persona: { id: 'sadgpt', name: 'Emo SadGPT', description: '' } }),
+      'POST /api/admin/personas/nihilist/restore': () => json({ persona: { id: 'nihilist', name: 'Nihilist SadGPT', description: '' } }),
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^system$/i }));
+    const list = await screen.findByTestId('persona-list');
+    expect(within(list).getByText('Everyone')).toBeTruthy();
+
+    await userEvent.click(within(list).getByRole('button', { name: /Emo SadGPT/ }));
+    const character = (await screen.findByLabelText(/^character/i)) as HTMLTextAreaElement;
+    expect(character.value).toBe('You are emo.');
+    await userEvent.type(character, ' Very.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(bodyOf(fetch, 'PUT', '/api/admin/personas/sadgpt')).toEqual({ name: 'Emo SadGPT', description: 'The default', body: 'You are emo. Very.' });
+
+    await userEvent.click(within(await screen.findByTestId('persona-list')).getByRole('button', { name: /Emo SadGPT/ }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Reset to default' }));
+    await waitFor(() => expect(fetch.mock.calls.some(([u]) => u === '/api/admin/personas/sadgpt/restore')).toBe(true));
+
+    await userEvent.click(within(await screen.findByTestId('persona-list')).getByRole('button', { name: '+ Nihilist SadGPT' }));
+    await waitFor(() => expect(fetch.mock.calls.some(([u]) => u === '/api/admin/personas/nihilist/restore')).toBe(true));
+  });
+
+  it('creates a new persona and edits the shared rules', async () => {
+    const fetch = loggedIn({
+      'GET /api/admin/system': SYSTEM,
+      'GET /api/admin/personas': () => json(PERSONAS),
+      'POST /api/admin/personas': (init) => {
+        const b = JSON.parse(init.body as string);
+        return b.name === 'Taken' ? json({ error: 'Give the persona a name.' }, 400) : json({ persona: { id: 'grumpy', ...b } });
+      },
+      'GET /api/admin/personas/rules': () => json({ text: '## Language\nReply in their language.' }),
+      'PUT /api/admin/personas/rules': (init) => json({ text: JSON.parse(init.body as string).text }),
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^system$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: '+ New persona' }));
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toHaveProperty('disabled', true); // needs a name and a character
+    await userEvent.type(screen.getByLabelText('Name'), 'Taken');
+    await userEvent.type(screen.getByLabelText(/^character/i), 'Grumbles.');
+    await userEvent.click(save);
+    expect((await screen.findByRole('alert')).textContent).toBe('Give the persona a name.');
+    await userEvent.clear(screen.getByLabelText('Name'));
+    await userEvent.type(screen.getByLabelText('Name'), 'Grumpy');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByTestId('persona-list');
+    expect(bodyOf(fetch, 'POST', '/api/admin/personas')).toEqual({ name: 'Grumpy', description: '', body: 'Grumbles.' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Shared rules' }));
+    const rules = (await screen.findByLabelText('Rules')) as HTMLTextAreaElement;
+    expect(rules.value).toBe('## Language\nReply in their language.');
+    await userEvent.type(rules, ' Always.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByTestId('persona-list');
+    expect(bodyOf(fetch, 'PUT', '/api/admin/personas/rules')).toEqual({ text: '## Language\nReply in their language. Always.' });
+  });
+});
+
+describe('a persona written for one person', () => {
+  const OLA = { slug: 'ola', name: 'Ola', aliases: [], info: '', persona: null, customPersona: 'Heartbroken over Ola.', claimedBy: null };
+
+  it('People: shows and edits it, and switching to a listed persona drops it', async () => {
+    const fetch = loggedIn({
+      'GET /api/admin/people': () => json({ people: [OLA], errors: [] }),
+      'GET /api/admin/personas': () => json(PERSONAS),
+      'PUT /api/admin/people/ola': (init) => json({ person: { ...OLA, ...JSON.parse(init.body as string) } }),
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^people$/i }));
+    const row = await screen.findByTestId('person-row');
+    expect(row.textContent).toContain('own persona');
+    await userEvent.click(row);
+
+    const select = screen.getByLabelText(/persona once you approve them/i) as HTMLSelectElement;
+    await screen.findByRole('option', { name: 'Emo SadGPT' });
+    expect(select.value).toBe('_custom');
+    const text = screen.getByLabelText(/their persona/i) as HTMLTextAreaElement;
+    expect(text.value).toBe('Heartbroken over Ola.');
+    await userEvent.type(text, ' Very.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('button', { name: '+ New person' });
+    expect(bodyOf(fetch, 'PUT', '/api/admin/people/ola')).toMatchObject({ persona: null, customPersona: 'Heartbroken over Ola. Very.' });
+
+    await userEvent.click(await screen.findByTestId('person-row'));
+    await screen.findByRole('option', { name: 'Emo SadGPT' });
+    await userEvent.selectOptions(screen.getByLabelText(/persona once you approve them/i), 'Emo SadGPT');
+    expect(screen.queryByLabelText(/their persona/i)).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('button', { name: '+ New person' });
+    expect(bodyOf(fetch, 'PUT', '/api/admin/people/ola')).toMatchObject({ persona: 'sadgpt', customPersona: null });
+  });
+
+  it('People: a custom persona needs text before saving', async () => {
+    loggedIn({ 'GET /api/admin/personas': () => json(PERSONAS) });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^people$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: '+ New person' }));
+    await userEvent.type(screen.getByLabelText('Display name'), 'Per');
+    await screen.findByRole('option', { name: 'Emo SadGPT' });
+    await userEvent.selectOptions(screen.getByLabelText(/persona once you approve them/i), 'Custom: written below, just for them');
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true);
+    await userEvent.type(screen.getByLabelText(/their persona/i), 'Be nice to Per.');
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false);
+  });
+
+  it("Sessions: 'no pick' means their own persona when they have one", async () => {
+    const session = { ...KARI, name: 'Ola', state: 'claimed', person: { slug: 'ola', name: 'Ola', hasCustomPersona: true } };
+    loggedIn({
+      'GET /api/admin/sessions': () => json({ sessions: [session] }),
+      'GET /api/admin/sessions/s1': () => json({ session, messages: [], gates: [], photos: [] }),
+      'GET /api/admin/gates': () => json({ definitions: [], errors: [], active: [] }),
+      'GET /api/admin/personas': () => json(PERSONAS),
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^sessions$/i }));
+    await userEvent.click(await screen.findByTestId('session-row'));
+    expect(await screen.findByRole('option', { name: "Ola's own persona (People)" })).toBeTruthy();
   });
 });

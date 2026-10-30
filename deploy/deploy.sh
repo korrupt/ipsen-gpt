@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the image on this machine (the droplet only has 4 GB RAM), ships it
-# over SSH (no registry needed), syncs compose + persona + gates, and restarts the app.
+# over SSH (no registry needed), syncs compose + gates, and restarts the app.
+# Personas are edited in admin and live in the data folder; deploys never touch them.
 #
 #   usage: deploy/deploy.sh [user@droplet-ip] [--skip-checks]
 #
@@ -51,9 +52,9 @@ docker build --platform linux/amd64 -q -t "ipsengpt:$TAG" . >/dev/null
 log "ship: image -> $TARGET"
 docker save "ipsengpt:$TAG" | gzip -1 | remote 'gunzip | docker load' >/dev/null
 
-log "sync: compose file, persona and gates"
+log "sync: compose file and gates"
 rsync -a deploy/docker-compose.yml "$TARGET:$REMOTE_DIR/docker-compose.yml"
-rsync -a content/persona.md content/gates.json "$TARGET:$REMOTE_DIR/content/"
+rsync -a content/gates.json "$TARGET:$REMOTE_DIR/content/"
 
 PREVIOUS=$(remote "grep -oP '^IPSENGPT_TAG=\K.*' $REMOTE_DIR/.env || true")
 log "start: $PREVIOUS -> $TAG"
@@ -61,8 +62,14 @@ remote "set -e
   cd $REMOTE_DIR
   sed -i 's/^IPSENGPT_TAG=.*/IPSENGPT_TAG=$TAG/' .env
   grep -q '^IPSENGPT_TAG=' .env || echo 'IPSENGPT_TAG=$TAG' >> .env
-  docker compose up -d --remove-orphans >/dev/null 2>&1
   set -a; . ./.env; set +a
+  # Data folders added after setup.sh ran: created for the container's node user (uid 1000),
+  # or Docker would create them as root and the app couldn't write.
+  for dir in personas; do
+    path=\${DATA_ROOT:-/srv/ipsengpt}/\$dir
+    [ -d \"\$path\" ] || sudo -n install -d -m 750 -o 1000 -g 1000 \"\$path\"
+  done
+  docker compose up -d --remove-orphans >/dev/null 2>&1
   for _ in \$(seq 1 60); do
     curl -sf http://127.0.0.1:\${APP_PORT:-3000}/api/health >/dev/null && exit 0
     sleep 1

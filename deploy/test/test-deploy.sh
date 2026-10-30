@@ -27,6 +27,9 @@ shift # host
 exec bash -c "$*"
 SH
 chmod +x "$WORK/bin/ssh"
+# Fake sudo for the "remote" side: deploy.sh creates data folders that setup.sh didn't (e.g. personas/).
+printf '#!/usr/bin/env bash\n[[ $1 == -n ]] && shift\nexec "$@"\n' > "$WORK/bin/sudo"
+chmod +x "$WORK/bin/sudo"
 
 MOCK_OLLAMA_PORT=$PRIMARY_PORT MOCK_OLLAMA_REPLY=PRIMARY-REPLY \
   "$REPO_ROOT/apps/server/node_modules/.bin/tsx" "$REPO_ROOT/apps/server/src/dev/mock-ollama-cli.ts" >/dev/null 2>&1 &
@@ -51,7 +54,7 @@ tag=$(grep -oP '^IPSENGPT_TAG=\K.*' "$WORK/app/.env")
 assert_contains "$tag" "$(git -C "$REPO_ROOT" rev-parse --short HEAD)" "IPSENGPT_TAG updated to the git revision"
 assert_contains "$out" "previous: previous-tag" "reports the previous tag for rollback"
 cmp -s "$DEPLOY_DIR/docker-compose.yml" "$WORK/app/docker-compose.yml" && pass "compose file synced" || fail "compose not synced"
-cmp -s "$REPO_ROOT/content/persona.md" "$WORK/app/content/persona.md" && pass "persona synced" || fail "persona not synced"
+[[ ! -e "$WORK/app/content/personas" ]] && pass "personas are not synced (they're edited in admin)" || fail "deploy.sh still syncs personas"
 cmp -s "$REPO_ROOT/content/gates.json" "$WORK/app/content/gates.json" && pass "gates synced" || fail "gates not synced"
 docker image inspect "ipsengpt:$tag" >/dev/null && pass "image loaded via docker save | ssh docker load"
 
@@ -61,9 +64,14 @@ token=$(curl -sf -X POST "$BASE/api/session" -H 'content-type: application/json'
 assert_contains "$(curl -sN -X POST "$BASE/api/chat" -H "authorization: Bearer $token" -H 'content-type: application/json' -d '{"message":"hi"}')" \
   "PRIMARY-REPLY" "deployed app chats through the PC"
 
+[[ "$(stat -c %u:%a "$WORK/data/personas")" == 1000:750 ]] && pass "deploy.sh creates the personas folder for the app's user" || fail "personas folder: $(stat -c %u:%a "$WORK/data/personas")"
+[[ -f "$WORK/data/personas/sadgpt.md" ]] && pass "the shipped personas are copied into the data folder" || fail "personas not seeded"
+
 step "Redeploy keeps data"
+printf -- '---\nname: Edited\n---\nYou are EditedGhost.\n' > "$WORK/data/personas/sadgpt.md"
 out=$(deploy 2>&1) || fail "second deploy failed: $out"
 assert_contains "$(curl -sf "$BASE/api/session" -H "authorization: Bearer $token")" '"name":"Kari"' "session survives redeploy"
+grep -q EditedGhost "$WORK/data/personas/sadgpt.md" && pass "persona edits survive a redeploy" || fail "redeploy overwrote a persona edit"
 
 step "Refuses to deploy without a .env on the droplet"
 mv "$WORK/app/.env" "$WORK/app/.env.bak"

@@ -1,20 +1,21 @@
 import { createApp } from './app.js';
 import { loadEnvFile, parseConfig } from './config.js';
-import { loadPersona } from './prompt.js';
 import { createServices } from './services.js';
 
 const baseDir = loadEnvFile();
 const config = parseConfig(process.env, baseDir);
 
-// Fail fast on a missing persona instead of on the first chat.
-loadPersona(config.chat.personaPath);
-
 const services = createServices(config);
+// Fail fast on missing personas instead of on the first chat.
+services.personas.promptFor(null);
 const app = createApp({ config, services });
 const server = app.listen(config.port, config.host, () => {
-  console.log(`IpsenGPT listening on http://${config.host}:${config.port}`);
+  console.log(`SadGPT listening on http://${config.host}:${config.port}`);
   console.log(`Ollama: ${config.ollama.url} (model ${config.ollama.model})`);
   console.log(`Database: ${config.dbPath}`);
+  const personas = services.personas.load();
+  console.log(`Personas: ${config.chat.personasDir} (${personas.personas.length} loaded, active: ${services.personas.activeId()})`);
+  for (const e of personas.errors) console.warn(`  personas/${e}`);
   console.log(`People: ${config.peopleDir} (${services.people.list().length} loaded)`);
   for (const e of services.people.errors) console.warn(`  people/${e}`);
   const gates = services.gateDefs();

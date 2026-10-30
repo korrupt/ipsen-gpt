@@ -1,3 +1,4 @@
+import type { Scoreboard, Standing } from './events';
 import type { GateView } from './photos';
 
 const TOKEN_KEY = 'ipsengpt.token';
@@ -30,7 +31,7 @@ export class ApiError extends Error {
   }
 }
 
-export const NETWORK_ERROR = 'The spirits could not reach the server. Check your connection and try again.';
+export const NETWORK_ERROR = 'SadGPT could not reach the server. Check your connection and try again.';
 
 // localStorage can throw (private mode, blocked storage); the app still works for this page load.
 export function getToken(): string | null {
@@ -93,6 +94,11 @@ export async function createSession(name: string): Promise<{ session: SessionVie
 
 export function fetchSession(): Promise<{ session: SessionView; messages: HistoryItem[]; gate?: GateView | null }> {
   return request('GET', '/api/session');
+}
+
+/** The leaderboard and rewards (prizes hidden until revealed) and the guest's own standing. */
+export function fetchLeaderboard(): Promise<Scoreboard & { me: Standing }> {
+  return request('GET', '/api/leaderboard');
 }
 
 export async function chooseName(name: string): Promise<SessionView> {

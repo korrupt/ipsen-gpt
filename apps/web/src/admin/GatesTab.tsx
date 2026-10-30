@@ -126,8 +126,8 @@ export function ForceGateForm({
           />
           <textarea
             className="admin-input admin-textarea"
-            placeholder="What IpsenGPT says, e.g. Show me a broomstick or be silent forever."
-            aria-label="What IpsenGPT demands"
+            placeholder="What SadGPT says, e.g. Show me a broomstick. It's the only thing that could cheer me up."
+            aria-label="What SadGPT demands"
             maxLength={1000}
             rows={2}
             value={guestPrompt}

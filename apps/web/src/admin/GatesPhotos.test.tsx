@@ -151,7 +151,7 @@ describe('gates tab', () => {
     const submit = within(form).getByRole('button', { name: 'Force gate' });
     expect(submit).toHaveProperty('disabled', true);
     await userEvent.type(within(form).getByLabelText('Custom gate target'), 'a broomstick');
-    await userEvent.type(within(form).getByLabelText('What IpsenGPT demands'), 'Broom or bust.');
+    await userEvent.type(within(form).getByLabelText('What SadGPT demands'), 'Broom or bust.');
     await userEvent.type(within(form).getByLabelText('Deadline in minutes'), '10');
     await userEvent.click(submit);
     expect((await screen.findByRole('status')).textContent).toBe('Gate forced');

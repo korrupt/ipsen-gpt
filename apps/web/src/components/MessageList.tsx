@@ -29,7 +29,7 @@ export function MessageList({ messages, onRetry }: Props) {
       <main className="messages">
         <div className="empty">
           <div className="portrait" aria-hidden="true" />
-          <h2 className="empty__title">What can I haunt for you?</h2>
+          <h2 className="empty__title">Ask me anything. I'll still be sad.</h2>
         </div>
       </main>
     );
@@ -45,7 +45,7 @@ export function MessageList({ messages, onRetry }: Props) {
             data-testid={`msg-${m.role}`}
           >
             {m.content}
-            {m.status === 'streaming' && <span className="cursor" aria-label="IpsenGPT is typing" />}
+            {m.status === 'streaming' && <span className="cursor" aria-label="SadGPT is typing" />}
             {m.status === 'error' && m.id === last?.id && (
               <div className="msg__actions">
                 <button type="button" className="link-button" onClick={onRetry}>

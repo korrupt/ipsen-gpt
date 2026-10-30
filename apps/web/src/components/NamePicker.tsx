@@ -7,7 +7,7 @@ interface Props {
 
 export const NAME_MAX_LENGTH = 24;
 
-/** First screen: guests choose what IpsenGPT calls them. */
+/** First screen: guests choose what SadGPT calls them. */
 export function NamePicker({ notice, onSubmit }: Props) {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);

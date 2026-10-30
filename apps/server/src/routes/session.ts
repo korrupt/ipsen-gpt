@@ -8,7 +8,7 @@ import type { Services } from '../services.js';
 
 const NameBody = z.object({ name: z.string().max(200) });
 
-export function sessionRouter(config: Config, { sessions, gates, limiter }: Services): Router {
+export function sessionRouter(config: Config, { sessions, gates, limiter, points, scoreboard }: Services): Router {
   const router = Router();
   /** The gate the guest must pass before chatting, if any. */
   const currentGate = (sessionId: string) => {
@@ -44,6 +44,11 @@ export function sessionRouter(config: Config, { sessions, gates, limiter }: Serv
       gate: currentGate(s.id),
       messages: sessions.recentMessages(s.id, 200).map(({ role, content }) => ({ role, content })),
     });
+  });
+
+  /** The leaderboard and rewards (prizes hidden until revealed), plus the guest's own standing. */
+  router.get('/leaderboard', requireSession(sessions), (_req, res) => {
+    res.json({ ...scoreboard(), me: points.standing(sessionOf(res).id) });
   });
 
   router.put('/session/name', requireSession(sessions), (req, res) => {

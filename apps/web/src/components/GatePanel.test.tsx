@@ -59,10 +59,10 @@ describe('photo gate', () => {
     await userEvent.click(consent());
     expect(takePhoto()).toHaveProperty('disabled', false);
     // Chat stays open: messages get in-character refusals from the server.
-    expect(screen.getByRole('textbox', { name: /message ipsengpt/i })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: /message sadgpt/i })).toBeTruthy();
   });
 
-  it('sends a resized copy, then the original; a pass removes the gate and IpsenGPT speaks', async () => {
+  it('sends a resized copy, then the original; a pass removes the gate and SadGPT speaks', async () => {
     const drawn = stubImages({ width: 4000, height: 3000 });
     const fetch = returningGuest({
       'POST /api/photos/verify': () =>
@@ -87,7 +87,7 @@ describe('photo gate', () => {
     expect(orig[1].body).toBe(original);
   });
 
-  it('a failed photo shows the line and what IpsenGPT saw; the gate stays', async () => {
+  it('a failed photo shows the line and what SadGPT saw; the gate stays', async () => {
     stubImages();
     returningGuest({
       'POST /api/photos/verify': () =>
@@ -98,7 +98,7 @@ describe('photo gate', () => {
     await screen.findByText('Bring me a pumpkin!');
     await upload();
     const status = await screen.findByRole('status');
-    expect(status.textContent).toBe('That is not what I asked for.IpsenGPT saw: A cat on a sofa.');
+    expect(status.textContent).toBe('That is not what I asked for.SadGPT saw: A cat on a sofa.');
     expect(screen.getByText('Bring me a pumpkin!')).toBeTruthy();
     expect(takePhoto()).toHaveProperty('disabled', false);
   });
@@ -144,7 +144,7 @@ describe('photo gate', () => {
       null,
     );
     render(<App />);
-    await userEvent.type(await screen.findByRole('textbox', { name: /message ipsengpt/i }), 'hello{Enter}');
+    await userEvent.type(await screen.findByRole('textbox', { name: /message sadgpt/i }), 'hello{Enter}');
     expect(await screen.findByText('Bring me a pumpkin!')).toBeTruthy();
     expect(screen.getByTestId('msg-assistant').textContent).toBe('No pumpkin, no talk.');
   });

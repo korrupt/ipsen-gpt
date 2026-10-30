@@ -8,9 +8,9 @@ const Trigger = z.discriminatedUnion('type', [
   z.object({ type: z.literal('session_start') }),
   /** Once the guest has sent `count` messages. */
   z.object({ type: z.literal('after_messages'), count: z.number().int().positive() }),
-  /** Offered to break a curse (Phase 5). */
+  /** Offered to break a curse (Phase 6). */
   z.object({ type: z.literal('curse_break') }),
-  /** Required before a secrets-game level unlocks (Phase 6). */
+  /** Required before a secrets-game level unlocks (Phase 7). */
   z.object({ type: z.literal('secret_level'), level: z.number().int().positive() }),
   /** Only when the admin forces it. */
   z.object({ type: z.literal('admin_forced') }),
@@ -28,7 +28,7 @@ const GateDefSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/, 'lowercase letters, digits and dashes'),
   /** What must be in the photo; used in the verification prompt. */
   target: z.string().trim().min(1).max(200),
-  /** What IpsenGPT demands, in character. */
+  /** What SadGPT demands, in character. */
   guest_prompt: z.string().trim().min(1).max(1000),
   refusal_lines: z.array(z.string().trim().min(1).max(500)).default([]),
   points: z.number().int().min(0).default(0),

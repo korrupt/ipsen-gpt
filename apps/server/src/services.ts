@@ -7,6 +7,8 @@ import { loadGateDefs, type GateDefSet } from './gateDefs.js';
 import { GateStore, gateView } from './gates.js';
 import { Llm } from './llm.js';
 import { PeopleStore } from './people.js';
+import { PersonaStore } from './personas.js';
+import { PointsStore, rewardView } from './points.js';
 import { PhotoStore } from './photos.js';
 import { RateLimiter } from './rateLimit.js';
 import { SessionStore } from './sessions.js';
@@ -15,6 +17,8 @@ import { Settings } from './settings.js';
 export interface Services {
   db: Db;
   people: PeopleStore;
+  personas: PersonaStore;
+  points: PointsStore;
   sessions: SessionStore;
   gates: GateStore;
   /** Current gate definitions, read from disk. */
@@ -35,7 +39,14 @@ export interface Services {
   verifying: Set<string>;
   /** Fires timed gates and expires deadlines; index.ts runs it every few seconds. */
   tick: () => void;
+  /** What guests see of the scores: the top of the leaderboard and the rewards. */
+  scoreboard: () => { top: { rank: number; name: string; points: number }[]; rewards: ReturnType<typeof rewardView>[] };
+  /** Sends every open page the new scoreboard and its own score (after points or names change). */
+  pushScores: () => void;
 }
+
+/** How many places guests see on the leaderboard (their own place is always shown too). */
+export const LEADERBOARD_SIZE = 10;
 
 export interface ServiceOptions {
   now?: () => number;
@@ -57,8 +68,30 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     write(msg, err);
     errors.add(msg, err);
   };
+  const personas = new PersonaStore(config.chat.personasDir, config.chat.defaultPersona, settings, config.chat.personasSeedDir);
+  try {
+    const copied = personas.seed();
+    if (copied.length) write(`Personas: copied ${copied.length} defaults into ${config.chat.personasDir}`);
+  } catch (err) {
+    log(`Could not copy the default personas into ${config.chat.personasDir}`, err);
+  }
   const llm = new Llm(config.ollama, settings, log, now);
   const events = new EventHub();
+  const points = new PointsStore(db, now);
+  const scoreboard = () => ({
+    top: points.leaderboard(LEADERBOARD_SIZE).map(({ rank, name, points: p }) => ({ rank, name, points: p })),
+    rewards: points.rewards().map(rewardView),
+  });
+  const pushScores = () => {
+    const board = scoreboard();
+    events.broadcast('scoreboard', board);
+    // Places shift for everyone when one score changes, so everyone gets their own standing.
+    for (const id of events.sessionIds()) events.toSession(id, 'points', points.standing(id));
+  };
+  points.onChange = ({ won }) => {
+    pushScores();
+    for (const r of won) if (r.winnerId) events.toSession(r.winnerId, 'reward_won', rewardView(r));
+  };
   // Push changes to guests the moment they happen.
   llm.onStatusChange = (status) => events.broadcast('status', status);
   gates.onChange = (ids) => {
@@ -71,6 +104,8 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
   return {
     db,
     people,
+    personas,
+    points,
     sessions,
     gates,
     gateDefs,
@@ -84,6 +119,8 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
     log,
     inFlight: new Set(),
     verifying: new Set(),
+    scoreboard,
+    pushScores,
     tick: () =>
       gates.tick(
         () => sessions.liveNamedIds(),

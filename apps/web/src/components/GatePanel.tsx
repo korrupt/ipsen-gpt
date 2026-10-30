@@ -34,7 +34,7 @@ function useSecondsLeft(deadlineAt: number | null): number | null {
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 /**
- * Shown while a photo gate blocks the chat: IpsenGPT's demand, a consent
+ * Shown while a photo gate blocks the chat: SadGPT's demand, a consent
  * checkbox, and the camera button. Only the server decides whether a photo passes.
  */
 export function GatePanel({ gate, onResult, onSessionGone, onExpired }: Props) {
@@ -111,12 +111,12 @@ export function GatePanel({ gate, onResult, onSessionGone, onExpired }: Props) {
           }}
         />
         <button type="button" className="gate__button" disabled={!consent || busy} onClick={() => fileRef.current?.click()}>
-          {busy ? 'IpsenGPT is studying your photo…' : 'Take photo'}
+          {busy ? 'SadGPT is studying your photo…' : 'Take photo'}
         </button>
         {feedback && (
           <div className={`gate__feedback gate__feedback--${feedback.tone}`} role="status">
             <p>{feedback.text}</p>
-            {feedback.reason && <p className="gate__reason">IpsenGPT saw: {feedback.reason}</p>}
+            {feedback.reason && <p className="gate__reason">SadGPT saw: {feedback.reason}</p>}
           </div>
         )}
       </div>

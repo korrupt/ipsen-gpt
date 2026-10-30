@@ -1,14 +1,15 @@
-# IpsenGPT
+# SadGPT
 
-Halloween costume chatbot. See [PLAN.md](PLAN.md) for the full spec.
+Halloween costume chatbot: SadGPT, a sad emo chatbot (formerly IpsenGPT; the repo and server paths keep
+the old name). See [PLAN.md](PLAN.md) for the full spec.
 
 ```
 apps/server   Express + TypeScript API (SSE chat streaming against Ollama)
 apps/web      React + Vite frontend: guest chat at /, admin dashboard at /admin/
-content/      persona.md (the system prompt, never sent to the client)
+content/      personas/ (the shipped personas: copied into data/personas on first start; never sent to the client)
               gates.json (photo gates for everyone)
               people.example/ (an example person folder)
-data/         runtime state, gitignored: SQLite DB, people/, photos/ (volumes in production)
+data/         runtime state, gitignored: SQLite DB, people/, photos/, personas/ (volumes in production)
 deploy/       Docker Compose, Nginx, droplet + PC scripts, deploy tests (see Deployment)
 ```
 
@@ -32,7 +33,7 @@ cp .env.example .env
 
 Test on a phone on the same network: `pnpm --filter @ipsengpt/web dev --host` and open the printed LAN URL.
 
-The persona (`content/persona.md`) is re-read on every message, so edits apply without a restart.
+Personas are edited in Admin → System and re-read on every message, so edits apply without a restart.
 
 ## Guests, claims and admin
 
@@ -48,6 +49,42 @@ The persona (`content/persona.md`) is re-read on every message, so edits apply w
   [content/people.example](content/people.example). Edit them by hand and press
   "Reload from disk", or edit in admin. Deleted people go to `PEOPLE_DIR/.trash/`.
   A person's info only reaches the model in their own chat, after their claim is approved.
+
+## Personas
+
+Edit them in **Admin → System → Edit personas**: name, description (only you see it) and the character,
+plus **Shared rules**, which come **first** in every prompt: the language rule (English only), length,
+safety, and "you can't give points". Deleted personas go to `.trash/`; the shipped ones
+can be reset to their original text or added back.
+
+On disk each persona is `<id>.md` (frontmatter `name`, `description`, then the character) in `PERSONAS_DIR`
+(`data/personas`, a volume in production), next to `_rules.md`. It's party data: on first start the app
+copies in the shipped ones from `content/personas/` (`PERSONAS_SEED_DIR`), and deploys never overwrite it.
+The persona a guest gets:
+
+1. their own, set in **Admin → Sessions** (any guest), else
+2. the global one, picked in **Admin → System**, else
+3. `DEFAULT_PERSONA` (`sadgpt`).
+
+A person can get a persona in **Admin → People**, applied when their claim is approved or they are assigned:
+- one from the list (`persona: <id>` in their `person.md`), or
+- **Custom**: text written just for them (how SadGPT acts toward them), saved as `persona.md` in their
+  folder. It comes after the shared rules and is used whenever their session has no persona picked in
+  Sessions. It's separate from their "Info" (what SadGPT knows about them).
+
+Switches apply from the guest's next message.
+
+## Points, leaderboard and rewards
+
+- Every point change is a row in a ledger with a reason. For now points come from **passed photo gates**
+  (the gate's `points`) and from you: **Admin → Points** (or a guest's page in Sessions) gives or takes
+  points with a reason the guest sees as a notice.
+- Guests see their points in the header; tapping it opens the leaderboard (top 10 plus their own place)
+  and the rewards. Named, live sessions with points take part; a tie goes to whoever got there first.
+- **Rewards** are "first to N points". The first guest to reach N wins it automatically and for good;
+  a reward added late still goes to whoever reached N first. Each has a **Show/Hide prize** switch:
+  hidden prizes show as "???" to guests. The winner gets a notice.
+- Everything updates live over `/api/events`.
 
 ## Photo gates
 
@@ -77,7 +114,7 @@ every use, so edits apply without a restart; mistakes show up in Admin → Gates
 | `after_messages` | Right after the reply to the guest's `count`th message, so it shows up before they type again. |
 | `timed_global` | At `at` (ISO time **with timezone**, e.g. `2026-10-31T22:30:00+01:00`), for every guest, until `deadline_minutes` later. Then it expires; whoever didn't make it misses the points. |
 | `admin_forced` | Only when you force it in admin. |
-| `curse_break`, `secret_level` | Reserved for curses (Phase 5) and the secrets game (Phase 6). |
+| `curse_break`, `secret_level` | Reserved for curses (Phase 6) and the secrets game (Phase 7). |
 
 - `target` goes into the verification prompt: describe what the camera should see.
 - `refusal_lines` are used in turn. Leave it empty to let the model make up refusals.
@@ -117,7 +154,7 @@ guest phone ──HTTPS──▶ Cloudflare ──HTTPS──▶ droplet: Nginx 
 ```
 
 There is one model, on the PC. **While it can't be reached, chat is closed**: guests see a banner
-("IpsenGPT has lost contact with the spirit world…") and can't send, and it reopens by itself when the
+("SadGPT has gone quiet and needs a moment alone…") and can't send, and it reopens by itself when the
 PC is back. Guests get these changes live over `/api/events`.
 - **Checked every `OLLAMA_CHECK_INTERVAL_MS`** (5 s): the PC must answer and have `OLLAMA_MODEL` pulled.
 - **PC unreachable** (tunnel down, Ollama stopped) during a reply: that reply fails and chat closes at once.
@@ -210,13 +247,15 @@ Set `ADMIN_PASSWORD` (`openssl rand -base64 18`) and check the model names.
 deploy/deploy.sh <you>@<droplet-ip>
 ```
 This runs `pnpm check`, builds `ipsengpt:<git-sha>`, streams it to the droplet with
-`docker save | ssh docker load`, syncs the compose file, persona and gates, and runs `docker compose up -d`.
+`docker save | ssh docker load`, syncs the compose file and gates, and runs `docker compose up -d`.
+Personas are not synced: they're edited in admin and live in `/srv/ipsengpt/personas/`, which deploy.sh
+creates (for the app's user) if setup.sh predates it.
 It then waits for `/api/health`.
 **Rollback:** set `IPSENGPT_TAG=<previous>` (printed by deploy.sh) in `/srv/ipsengpt/app/.env`, then
 `docker compose up -d`.
 
-On the droplet, `/srv/ipsengpt/` holds `app/` (compose, `.env`, `content/persona.md` and `gates.json`), `db/`,
-`people/`, `photos/` and `backups/`. Data lives in bind mounts, so `up --build`, redeploys and
+On the droplet, `/srv/ipsengpt/` holds `app/` (compose, `.env`, `content/gates.json`), `db/`,
+`people/`, `photos/`, `personas/` and `backups/`. Data lives in bind mounts, so `up --build`, redeploys and
 container restarts never touch it.
 
 ### 4. Verify on the real droplet
@@ -264,7 +303,8 @@ docker compose start app
 ### Day-to-day
 
 - Logs: `docker compose logs -f app` (in `/srv/ipsengpt/app`).
-- Persona: edit `/srv/ipsengpt/app/content/persona.md`. It's live on the next message (deploy.sh overwrites it with the repo version).
+- Personas: switch in Admin → System (everyone) or Sessions (one guest); edit them in Admin → System.
+  Live on the next message. A new shipped persona in the repo shows up under "Deleted defaults" to add.
 - People: edit `/srv/ipsengpt/people/<slug>/person.md`, then Admin → People → *Reload from disk*.
 - Gates: edit `/srv/ipsengpt/app/content/gates.json` or `/srv/ipsengpt/people/<slug>/gates.json`. Live on next use
   (deploy.sh overwrites `content/gates.json` with the repo version).

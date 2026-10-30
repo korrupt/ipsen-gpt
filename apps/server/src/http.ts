@@ -3,7 +3,7 @@ import type { RateLimitRule } from './config.js';
 import type { RateLimiter } from './rateLimit.js';
 import type { Session, SessionStore } from './sessions.js';
 
-export const RATE_LIMITED_MESSAGE = 'Slow down, mortal. IpsenGPT needs a moment to recover.';
+export const RATE_LIMITED_MESSAGE = 'Slow down. SadGPT needs a moment to process its feelings.';
 
 /** Responds 429 and returns false if the key is over its limit. */
 export function allow(limiter: RateLimiter, res: Response, key: string, rule: RateLimitRule): boolean {

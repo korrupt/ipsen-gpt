@@ -1,7 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Placeholder portrait. Swap the portrait-image variable in src/theme.css. -->
-  <circle cx="32" cy="32" r="32" fill="#ececec"/>
-  <path d="M20 46V28a12 12 0 0 1 24 0v18l-4-3-4 3-4-3-4 3-4-3z" fill="#212121"/>
-  <circle cx="27" cy="29" r="2.5" fill="#ececec"/>
-  <circle cx="37" cy="29" r="2.5" fill="#ececec"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="SadGPT">
+  <!-- The SadGPT logo from the costume tee: a sad chat bubble with an emo fringe and a single tear. -->
+  <circle cx="100" cy="100" r="100" fill="#10A37F"/>
+  <g transform="translate(26 22) scale(0.74)" fill="none" stroke="#ffffff" stroke-width="10" stroke-linejoin="round">
+    <path d="M14 82 V54 A26 26 0 0 1 40 28 H160 A26 26 0 0 1 186 54 V94"/>
+    <path d="M186 114 V118 A26 26 0 0 1 160 144 H134"/>
+    <path d="M114 144 H92 L54 174 V144 H40 A26 26 0 0 1 14 118 V102"/>
+    <path d="M14 54 A26 26 0 0 1 40 28 H178 C148 40 118 60 104 104 C96 86 72 76 42 80 C30 82 20 80 14 78 Z" fill="#ffffff" stroke="none"/>
+    <circle cx="136" cy="88" r="8" fill="#ffffff" stroke="none"/>
+    <path d="M140 100 C146 110 148 115 144 119 C140 123 133 120 134 113 C135 109 138 105 140 100 Z" fill="#ffffff" stroke="none"/>
+    <path d="M80 128 Q102 112 124 128" stroke-linecap="round"/>
+  </g>
 </svg>

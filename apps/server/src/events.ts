@@ -20,6 +20,11 @@ export class EventHub {
     };
   }
 
+  /** Sessions with at least one open stream. */
+  sessionIds(): string[] {
+    return [...this.bySession.keys()];
+  }
+
   isListening(sessionId: string): boolean {
     return this.bySession.has(sessionId);
   }

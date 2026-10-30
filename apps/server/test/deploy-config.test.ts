@@ -41,9 +41,9 @@ describe('docker-compose.yml', () => {
     expect(compose.services.app?.ports).toBeUndefined();
   });
 
-  it('keeps database, people and photos in host volumes', () => {
+  it('keeps database, people, photos and personas in host volumes', () => {
     const vols = compose.services.app?.volumes ?? [];
-    for (const target of ['/data/db', '/data/people', '/data/photos']) {
+    for (const target of ['/data/db', '/data/people', '/data/photos', '/data/personas']) {
       expect(vols.some((v) => v.endsWith(`:${target}`)), target).toBe(true);
     }
   });
@@ -52,6 +52,10 @@ describe('docker-compose.yml', () => {
     const dockerfile = fs.readFileSync(path.join(DEPLOY, '../Dockerfile'), 'utf8');
     expect(dockerfile).toMatch(/PHOTOS_DIR=\/data\/photos\b/);
     expect(dockerfile).toMatch(/GATES_PATH=\/app\/content\/gates\.json\b/);
+    // Personas are edited in admin: writable volume, seeded from defaults outside the read-only ./content mount.
+    expect(dockerfile).toMatch(/PERSONAS_DIR=\/data\/personas\b/);
+    expect(dockerfile).toMatch(/PERSONAS_SEED_DIR=\/app\/personas-default\b/);
+    expect(dockerfile).toMatch(/COPY content\/personas \.\/personas-default/);
     expect(compose.services.app?.volumes).toContain('./content:/app/content:ro');
   });
 

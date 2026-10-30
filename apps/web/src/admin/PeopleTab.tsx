@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { adminApi, type AdminPerson } from './api';
+import { PersonaSelect, usePersonas } from './PersonaSelect';
 import { usePoll } from './usePoll';
 
 interface Props {
@@ -63,6 +64,7 @@ export function PeopleTab({ toast }: Props) {
               </div>
               <div className="admin-muted">
                 {p.aliases.length ? `Also: ${p.aliases.join(', ')}` : 'No aliases'}
+                {p.customPersona && ' · own persona'}
               </div>
             </button>
           </li>
@@ -71,6 +73,9 @@ export function PeopleTab({ toast }: Props) {
     </section>
   );
 }
+
+/** The persona dropdown's value for "written just for them". Not a valid persona id, so it can't clash. */
+const CUSTOM = '_custom';
 
 const splitAliases = (s: string) =>
   s
@@ -82,6 +87,9 @@ function PersonEditor({ person, onDone, toast }: { person: AdminPerson | null; o
   const [name, setName] = useState(person?.name ?? '');
   const [aliases, setAliases] = useState(person?.aliases.join(', ') ?? '');
   const [info, setInfo] = useState(person?.info ?? '');
+  const [persona, setPersona] = useState<string | null>(person?.customPersona ? CUSTOM : (person?.persona ?? null));
+  const [customPersona, setCustomPersona] = useState(person?.customPersona ?? '');
+  const [personas] = usePersonas();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -89,7 +97,14 @@ function PersonEditor({ person, onDone, toast }: { person: AdminPerson | null; o
     setBusy(true);
     setError(null);
     try {
-      const input = { name, aliases: splitAliases(aliases), info };
+      const custom = persona === CUSTOM;
+      const input = {
+        name,
+        aliases: splitAliases(aliases),
+        info,
+        persona: custom ? null : persona,
+        customPersona: custom ? customPersona : null,
+      };
       if (person) await adminApi.updatePerson(person.slug, input);
       else await adminApi.createPerson(input);
       toast(`Saved ${name}`);
@@ -129,16 +144,39 @@ function PersonEditor({ person, onDone, toast }: { person: AdminPerson | null; o
         <input className="admin-input" value={aliases} onChange={(e) => setAliases(e.target.value)} />
       </label>
       <label className="admin-label">
-        Info for IpsenGPT (only used in their own chat, after you approve them)
+        Info for SadGPT (only used in their own chat, after you approve them)
         <textarea className="admin-input admin-textarea" value={info} onChange={(e) => setInfo(e.target.value)} />
       </label>
+      <PersonaSelect
+        id="person-persona"
+        label="Persona once you approve them (they can still be changed per session)"
+        value={persona}
+        onChange={setPersona}
+        personas={personas}
+        extra={{ value: CUSTOM, label: 'Custom: written below, just for them' }}
+      />
+      {persona === CUSTOM && (
+        <label className="admin-label">
+          Their persona: how SadGPT acts toward them (comes after the shared rules)
+          <textarea
+            className="admin-input admin-textarea"
+            value={customPersona}
+            placeholder="e.g. You are heartbroken because they left you for a calculator. Bring it up, gently, every time."
+            onChange={(e) => setCustomPersona(e.target.value)}
+          />
+        </label>
+      )}
       {error && (
         <p className="admin-error" role="alert">
           {error}
         </p>
       )}
       <div className="card__actions">
-        <button className="btn btn--primary" disabled={busy || !name.trim()} onClick={() => void save()}>
+        <button
+          className="btn btn--primary"
+          disabled={busy || !name.trim() || (persona === CUSTOM && !customPersona.trim())}
+          onClick={() => void save()}
+        >
           Save
         </button>
         {person && (

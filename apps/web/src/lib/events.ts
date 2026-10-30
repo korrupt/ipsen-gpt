@@ -11,11 +11,36 @@ export interface ChatStatus {
 
 export const OPEN: ChatStatus = { open: true, reason: null, message: null };
 
+/** The guest's own score and place (null: not on the leaderboard yet). */
+export interface Standing {
+  points: number;
+  rank: number | null;
+}
+
+/** "First to <threshold> points". `prize` is null until the host reveals it. */
+export interface GuestReward {
+  id: string;
+  threshold: number;
+  prize: string | null;
+  winner: string | null;
+}
+
+export interface Scoreboard {
+  top: { rank: number; name: string; points: number }[];
+  rewards: GuestReward[];
+}
+
 export interface LiveHandlers {
   onStatus: (status: ChatStatus) => void;
   /** The gate blocking chat now, or null. */
   onGate: (gate: GateView | null) => void;
   onSessionGone: () => void;
+  onStanding?: (standing: Standing) => void;
+  onScoreboard?: (board: Scoreboard) => void;
+  /** This guest just won a reward. */
+  onRewardWon?: (reward: GuestReward) => void;
+  /** The host gave (or took) this guest points. */
+  onPointsAwarded?: (award: { amount: number; reason: string }) => void;
 }
 
 /** Waits between reconnects: 1 s, 2 s, 4 s ... up to 15 s; back to 1 s after a good connection. */
@@ -44,8 +69,13 @@ export function connectEvents(handlers: LiveHandlers): () => void {
         if (!res.body) throw new Error('no body');
         const parser = new SseParser(({ event, data }) => {
           attempt = 0;
-          if (event === 'status') handlers.onStatus(JSON.parse(data) as ChatStatus);
-          else if (event === 'gate') handlers.onGate((JSON.parse(data) as { gate: GateView | null }).gate);
+          const value: unknown = JSON.parse(data);
+          if (event === 'status') handlers.onStatus(value as ChatStatus);
+          else if (event === 'gate') handlers.onGate((value as { gate: GateView | null }).gate);
+          else if (event === 'points') handlers.onStanding?.(value as Standing);
+          else if (event === 'scoreboard') handlers.onScoreboard?.(value as Scoreboard);
+          else if (event === 'reward_won') handlers.onRewardWon?.(value as GuestReward);
+          else if (event === 'points_awarded') handlers.onPointsAwarded?.(value as { amount: number; reason: string });
         });
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
         for (;;) {
@@ -65,3 +95,6 @@ export function connectEvents(handlers: LiveHandlers): () => void {
   })();
   return () => stop.abort();
 }
+
+/** "First to 50 points" */
+export const rewardGoal = (r: GuestReward) => `First to ${r.threshold} points`;

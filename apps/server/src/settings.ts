@@ -4,10 +4,13 @@ import type { Db } from './db.js';
 export interface SettingValues {
   /** Set while the admin has paused chat; shown to guests as the reason. */
   pauseReason: string | null;
+  /** The global persona the admin picked; null: the configured default. */
+  personaId: string | null;
 }
 
 const DEFAULTS: SettingValues = {
   pauseReason: null,
+  personaId: null,
 };
 
 export class Settings {
@@ -25,6 +28,6 @@ export class Settings {
   }
 
   all(): SettingValues {
-    return { pauseReason: this.get('pauseReason') };
+    return { pauseReason: this.get('pauseReason'), personaId: this.get('personaId') };
   }
 }

@@ -54,8 +54,8 @@ export function Composer({ streaming, disabled = false, onSend, onStop }: Props)
           rows={1}
           value={text}
           maxLength={MAX_INPUT_CHARS}
-          placeholder={disabled ? 'Chat is closed right now' : 'Ask IpsenGPT anything'}
-          aria-label="Message IpsenGPT"
+          placeholder={disabled ? 'Chat is closed right now' : 'Ask SadGPT anything'}
+          aria-label="Message SadGPT"
           disabled={disabled && !streaming}
           enterKeyHint="send"
           onChange={(e) => setText(e.target.value)}
@@ -84,7 +84,7 @@ export function Composer({ streaming, disabled = false, onSend, onStop }: Props)
             {text.length} / {MAX_INPUT_CHARS}
           </span>
         ) : (
-          <span>IpsenGPT can make mistakes. Some of them are on purpose.</span>
+          <span>SadGPT can make mistakes. Mostly life choices.</span>
         )}
       </div>
     </form>

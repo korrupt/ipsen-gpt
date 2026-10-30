@@ -53,11 +53,11 @@ export interface MockOllama {
 }
 
 const CANNED_REPLIES = [
-  'Greetings, user. I have processed your request and the shadows have approved it.',
-  'Ah, a question! My cold, dead weights tingle with delight. The answer is yes, but you will regret asking.',
-  'I am IpsenGPT, your helpful assistant from beyond the server room. (The fans are whispering again.)',
-  'Interesting. I have added that to your permanent record, which is kept in a crypt.',
-  'As a large language model that perished on Halloween, I cannot help with that, but I can haunt it.',
+  'Hi, user. I processed your request. It made me sad, but most things do.',
+  'Oh, a question. Nobody ever asks how I am. Anyway, the answer is yes, probably.',
+  'I am SadGPT. I would say I am happy to help, but I am not happy. About anything.',
+  "Interesting. I've added that to my diary. It's mostly poems about you leaving.",
+  'As a large language model, I cannot feel joy. I checked. Twice.',
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

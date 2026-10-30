@@ -32,8 +32,8 @@ PRIMARY_PID=${PIDS[0]}
 
 step "Start stack (data in $WORK/data)"
 cp "$DEPLOY_DIR/docker-compose.yml" "$WORK/"
-mkdir -p "$WORK/content" "$WORK/data"/{db,people,photos}
-echo "You are TestGhost." > "$WORK/content/persona.md"
+mkdir -p "$WORK/content" "$WORK/data"/{db,people,photos,personas}
+echo '[]' > "$WORK/content/gates.json"
 cat > "$WORK/.env" <<ENV
 IPSENGPT_TAG=$IMAGE_TAG
 APP_PORT=$APP_PORT
@@ -51,8 +51,8 @@ pass "app healthy on 127.0.0.1:$APP_PORT"
 
 listen=$(ss -ltnH "sport = :$APP_PORT" | awk '{print $4}')
 assert_eq "$listen" "127.0.0.1:$APP_PORT" "app listens on loopback only"
-assert_contains "$(curl -s "$BASE/")" "<title>IpsenGPT</title>" "serves the guest app"
-assert_contains "$(curl -s "$BASE/admin/")" "IpsenGPT admin" "serves the admin app"
+assert_contains "$(curl -s "$BASE/")" "<title>SadGPT</title>" "serves the guest app"
+assert_contains "$(curl -s "$BASE/admin/")" "SadGPT admin" "serves the admin app"
 
 step "Chat through the PC (tunnel)"
 token=$(curl -sf -X POST "$BASE/api/session" -H 'content-type: application/json' -d '{"name":"Kari"}' \
@@ -65,7 +65,7 @@ kill "$PRIMARY_PID"; wait_for 5 bash -c "! curl -s http://127.0.0.1:$PRIMARY_POR
 # Capture first: `chat | grep -q` fails under pipefail when grep exits before curl finishes writing.
 closed() { grep -q '"code":"chat_closed"' <<<"$(chat two)"; }
 wait_for 5 closed && pass "chat closes within a few seconds" || fail "chat did not close: $(chat two)"
-assert_contains "$(chat two)" "lost contact with the spirit world" "guests are told why"
+assert_contains "$(chat two)" '"reason":"disconnected","message":"SadGPT' "guests are told why"
 
 step "Plug it back in"
 start_mock "$PRIMARY_PORT" "PRIMARY-REPLY"
@@ -79,14 +79,20 @@ session=$(curl -sf "$BASE/api/session" -H "authorization: Bearer $token")
 assert_contains "$session" '"name":"Kari"' "session survives restart"
 assert_contains "$session" "PRIMARY-REPLY" "chat history survives restart"
 [[ -f "$WORK/data/db/ipsengpt.sqlite" ]] && pass "database lives in the bind-mounted volume" || fail "no db file on host"
+diff -r "$REPO_ROOT/content/personas" "$WORK/data/personas" >/dev/null \
+  && pass "the shipped personas were copied into the empty personas volume" || fail "personas not seeded: $(ls "$WORK/data/personas")"
+# An edit made in admin (here: by hand, as the app's user would write it).
+printf -- '---\nname: Edited\n---\nYou are EditedGhost.\n' > "$WORK/data/personas/sadgpt.md"
 
 step "Recreate the container (as on deploy)"
 docker compose -p "$PROJECT" up -d --force-recreate >/dev/null 2>&1
 wait_for 30 curl -sf "$BASE/api/health" || fail "app not healthy after recreate"
 assert_contains "$(curl -sf "$BASE/api/session" -H "authorization: Bearer $token")" '"name":"Kari"' "session survives recreate"
 
-step "Persona edits apply without restart"
-echo "You are EditedGhost." > "$WORK/content/persona.md"
-docker compose -p "$PROJECT" exec -T app cat /app/content/persona.md | grep -q EditedGhost && pass "content mount is live" || fail "content not mounted"
+grep -q EditedGhost "$WORK/data/personas/sadgpt.md" && pass "persona edits survive a recreate (not re-seeded)" || fail "persona edit was overwritten"
+
+step "Content edits apply without restart"
+echo '[{"x":1}]' > "$WORK/content/gates.json"
+docker compose -p "$PROJECT" exec -T app cat /app/content/gates.json | grep -q '"x"' && pass "content mount is live" || fail "content not mounted"
 
 printf '\n\033[32m%d checks passed\033[0m\n' "$PASS"

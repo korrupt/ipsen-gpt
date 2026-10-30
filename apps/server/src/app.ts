@@ -2,18 +2,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import type { Config } from './config.js';
-import { loadPersona } from './prompt.js';
 import { adminRouter } from './routes/admin.js';
 import { chatRouter } from './routes/chat.js';
 import { eventsRouter } from './routes/events.js';
 import { photosRouter } from './routes/photos.js';
 import { sessionRouter } from './routes/session.js';
+import type { Session } from './sessions.js';
 import type { Services } from './services.js';
 
 export interface AppDeps {
   config: Config;
   services: Services;
-  getPersona?: () => string;
+  /** The persona prompt for a session (tests can override it). */
+  getPersona?: (session: Session) => string;
   log?: (msg: string, err?: unknown) => void;
 }
 
@@ -33,8 +34,14 @@ export function createApp({ config, services, getPersona, log = services.log }: 
     chatRouter({
       config,
       services,
-      // Re-read on every request so persona edits apply without a restart.
-      getPersona: getPersona ?? (() => loadPersona(config.chat.personaPath)),
+      // Re-read on every request so persona edits and switches apply at once.
+      getPersona:
+        getPersona ??
+        ((session) => {
+          // A claimed person's own persona text, if you wrote one for them.
+          const person = session.state === 'claimed' && session.personSlug ? services.people.get(session.personSlug) : undefined;
+          return services.personas.promptFor(session, person?.customPersona ?? null);
+        }),
       log,
     }),
   );

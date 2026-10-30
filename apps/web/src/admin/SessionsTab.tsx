@@ -11,7 +11,9 @@ import {
   type GateDefinition,
 } from './api';
 import { ForceGateForm, GateCard } from './GatesTab';
+import { PersonaSelect, usePersonas } from './PersonaSelect';
 import { PhotoDetail, PhotoGrid } from './PhotosTab';
+import { AwardForm } from './PointsTab';
 import { usePoll } from './usePoll';
 
 interface Props {
@@ -60,7 +62,7 @@ export function SessionsTab({ toast }: Props) {
               </div>
               <div className="admin-muted">
                 {s.person ? `${s.person.name} · ` : ''}
-                {s.messageCount ?? 0} msgs · seen {ago(s.lastSeenAt)}
+                {s.points} pts · {s.messageCount ?? 0} msgs · seen {ago(s.lastSeenAt)}
               </div>
             </button>
           </li>
@@ -80,6 +82,7 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
   const [openPhoto, setOpenPhoto] = useState<AdminPhoto | null>(null);
   const [slug, setSlug] = useState('');
   const [busy, setBusy] = useState(false);
+  const [personas] = usePersonas();
 
   const load = async () => {
     try {
@@ -173,6 +176,21 @@ function SessionDetail({ id, onBack, toast }: { id: string; onBack: () => void; 
           </button>
         </div>
       </div>
+
+      <div className="card">
+        <PersonaSelect
+          id="session-persona"
+          label="Persona for this guest"
+          value={session.personaId}
+          personas={personas}
+          disabled={busy}
+          fallbackLabel={session.person?.hasCustomPersona ? `${session.person.name}'s own persona (People)` : undefined}
+          onChange={(personaId) => void run('Persona changed', () => adminApi.setSessionPersona(session.id, personaId))}
+        />
+      </div>
+
+      <h3 className="admin-h3">Points: {session.points}</h3>
+      <AwardForm sessionId={session.id} toast={toast} onDone={() => void load()} />
 
       <div className="card__actions">
         <button

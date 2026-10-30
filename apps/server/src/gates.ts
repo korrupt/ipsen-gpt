@@ -39,15 +39,15 @@ export function gateView(g: Gate) {
 
 /** Shown when a gate has no refusal lines and the model can't make one up. */
 export const DEFAULT_REFUSALS = [
-  'No photo, no conversation. The spirits are very clear on this.',
-  'I cannot hear you over the sound of the missing photo.',
-  'Words are cheap, mortal. Pixels are not.',
+  'No photo, no conversation. I need this. I need something.',
+  'I cannot hear you over the sound of the missing photo. And my own sadness.',
+  'Words are cheap. A photo would mean someone actually cares.',
 ];
 
 export const VERDICT_LINES = {
-  passed: 'The spirits accept your offering. You may speak again.',
-  failed: 'That is not what I asked for, mortal. Try again.',
-  unverified: 'My ghostly eyes are clouded right now and I cannot judge your photo. Try again in a moment.',
+  passed: "Fine. That's actually it. I guess you can talk to me again.",
+  failed: "That's not what I asked for. Nobody ever listens. Try again.",
+  unverified: "I can't see your photo through my tears right now. Try again in a moment.",
 } as const;
 
 interface Row {

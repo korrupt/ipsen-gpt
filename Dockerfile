@@ -22,7 +22,8 @@ ENV NODE_ENV=production \
     HOST=127.0.0.1 \
     PORT=3000 \
     WEB_DIST=/app/web \
-    PERSONA_PATH=/app/content/persona.md \
+    PERSONAS_DIR=/data/personas \
+    PERSONAS_SEED_DIR=/app/personas-default \
     DB_PATH=/data/db/ipsengpt.sqlite \
     PEOPLE_DIR=/data/people \
     GATES_PATH=/app/content/gates.json \
@@ -30,8 +31,11 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build /out ./server
 COPY --from=build /src/apps/web/dist ./web
-# Default persona and gates; production mounts ./content over them so edits need no rebuild.
-COPY content/persona.md content/gates.json ./content/
+# Default gates; production mounts ./content over them so edits need no rebuild.
+COPY content/gates.json ./content/
+# The shipped personas, outside the ./content mount: copied into /data/personas on first start
+# (personas are edited in admin and live with the party data) and restorable from admin.
+COPY content/personas ./personas-default
 USER node
 WORKDIR /app/server
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

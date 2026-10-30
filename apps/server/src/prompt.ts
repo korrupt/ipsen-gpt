@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import type { ChatMessage } from './ollama.js';
 
 export interface HistoryMessage {
@@ -14,12 +13,6 @@ export interface PromptInput {
   /** How many previous user+assistant turns to keep. */
   historyTurns: number;
   userMessage: string;
-}
-
-export function loadPersona(personaPath: string): string {
-  const text = fs.readFileSync(personaPath, 'utf8').trim();
-  if (!text) throw new Error(`Persona file is empty: ${personaPath}`);
-  return text;
 }
 
 /** Keeps the last `turns` turns (a turn = one user + one assistant message). */
