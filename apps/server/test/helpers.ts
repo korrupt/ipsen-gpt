@@ -94,12 +94,16 @@ export interface TestEnv {
   tick(ms: number): void;
 }
 
-export function makeEnv(overrides: Record<string, string> = {}, setup?: (config: Config) => void): TestEnv {
+export function makeEnv(
+  overrides: Record<string, string> = {},
+  setup?: (config: Config) => void,
+  { random }: { random?: () => number } = {},
+): TestEnv {
   const config = makeConfig(overrides);
   setup?.(config);
   let now = 1_700_000_000_000;
   const logged: string[] = [];
-  const services = createServices(config, { now: () => now, write: (msg) => logged.push(msg) });
+  const services = createServices(config, { now: () => now, write: (msg) => logged.push(msg), random });
   const app = createApp({ config, services });
   return { config, services, app, logged, tick: (ms) => (now += ms) };
 }

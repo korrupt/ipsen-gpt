@@ -64,11 +64,13 @@ export interface ServiceOptions {
   now?: () => number;
   /** Where log lines go besides the error log. Default: stderr. */
   write?: (msg: string, err?: unknown) => void;
+  /** Dice for random gates. Default: Math.random. */
+  random?: () => number;
 }
 
 const stderr = (msg: string, err?: unknown) => console.error(`[${new Date().toISOString()}] ${msg}`, err ?? '');
 
-export function createServices(config: Config, { now = Date.now, write = stderr }: ServiceOptions = {}): Services {
+export function createServices(config: Config, { now = Date.now, write = stderr, random = Math.random }: ServiceOptions = {}): Services {
   const db = openDb(config.dbPath);
   const people = new PeopleStore(config.peopleDir);
   const settings = new Settings(db);
@@ -76,7 +78,7 @@ export function createServices(config: Config, { now = Date.now, write = stderr 
   const sessions = new SessionStore(db, people, now);
   const gateStore = new GateDefStore(config.gatesPath, people, config.gatesSeedPath);
   const gateDefs = () => gateStore.load();
-  const gates = new GateStore(db, gateDefs, now);
+  const gates = new GateStore(db, gateDefs, now, random);
   const log = (msg: string, err?: unknown) => {
     write(msg, err);
     errors.add(msg, err);

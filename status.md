@@ -22,7 +22,7 @@ Handover notes for the next agent. Read with [PLAN.md](PLAN.md) (the spec), [CLA
 | 4. Photo gates | done; accuracy on the 8b **not measured yet** (needs real photos from the user) | `04e1532` |
 | 5. SadGPT, leaderboard & points (new, 2026-10-30) | done (incl. persona editing in admin and per-person personas); check with the user that it's deployed | `08a656f`, `7759f35`, `35ec735` |
 | 6. Curses + live events | live events done (`status`, `gate`, scores); **curses not started** | `47c9301` |
-| 7. Secrets game | **built** 2026-10-30 (design in PLAN.md, notes below); waiting for the user's test and a deploy | uncommitted |
+| 7. Secrets game | done 2026-10-30 (design in PLAN.md, notes below); live on the droplet | `6f6a740` |
 | 8. Hardening & load tests | load test against the 8b done (see below); the rest not started | |
 | 9. Skin pass | not started (the rebrand already uses the tee's logo and teal) | |
 
@@ -134,6 +134,17 @@ fallback, live events) is deployed: it needs `OLLAMA_FIRST_TOKEN_TIMEOUT_MS=4500
   (a `session` event) in Phase 6.
 - PLAN.md open questions still open: character voice, gate targets and triggers, person-file
   content, whether curses cost points.
+
+## Random gates (party day, 2026-10-31)
+
+- The user asked for random gates. New trigger `random` (`after_messages`, `chance` per message);
+  `GateStore.afterReply` rolls the pool (shuffled, first hit wins) when no after_messages gate fired,
+  skipping gates the guest ever had and anything within `RANDOM_GATE_GAP` (3) messages of their last gate.
+  Dice are injectable (`createServices({ random })`, `makeEnv(..., { random })`).
+- Shipped pool (content/gates.json): pumpkin, candle, costume-mask (photo) and ghost-joke, compliment
+  (text, both probed on the 8b). Simulated: ~0.7 gates per guest in 10 messages, ~1.7 in 20, ~3 in 40.
+- On the droplet the gates file is data, so new shipped gates only arrive via Admin → Gates:
+  "Reset to shipped" on the edited ones and "Add back" for the new ones.
 
 ## Gate editing and text gates (after Phase 7, 2026-10-30)
 

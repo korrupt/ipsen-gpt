@@ -7,6 +7,7 @@ const TRIGGERS: { type: TriggerType; label: string }[] = [
   { type: 'admin_forced', label: 'Only when I force it' },
   { type: 'session_start', label: 'When they start (for a person: when approved)' },
   { type: 'after_messages', label: 'After a number of messages' },
+  { type: 'random', label: 'At random (from a number of messages on)' },
   { type: 'timed_global', label: 'At a set time, for everyone' },
   { type: 'secret_level', label: 'When they reach a secrets-game level' },
 ];
@@ -65,7 +66,8 @@ export function GateEditor({ gate, people, toast, onSaved, onCancel }: Props) {
   const [refusals, setRefusals] = useState((gate?.refusalLines ?? []).join('\n'));
   const [points, setPoints] = useState(String(gate?.points ?? 5));
   const [triggerType, setTriggerType] = useState<TriggerType>(t && t.type !== 'curse_break' ? t.type : 'admin_forced');
-  const [count, setCount] = useState(String(t?.type === 'after_messages' ? t.count : 5));
+  const [count, setCount] = useState(String(t?.type === 'after_messages' ? t.count : t?.type === 'random' ? t.after_messages : 5));
+  const [percent, setPercent] = useState(String(t?.type === 'random' ? Math.round(t.chance * 1000) / 10 : 5));
   const [level, setLevel] = useState(String(t?.type === 'secret_level' ? t.level : 4));
   const [at, setAt] = useState(t?.type === 'timed_global' ? toLocalInput(t.at) : '');
   const [minutes, setMinutes] = useState(String(t?.type === 'timed_global' ? t.deadline_minutes : 10));
@@ -79,6 +81,12 @@ export function GateEditor({ gate, people, toast, onSaved, onCancel }: Props) {
     switch (triggerType) {
       case 'after_messages':
         return Number.isInteger(Number(count)) && Number(count) > 0 ? { type: 'after_messages', count: Number(count) } : 'How many messages? A whole number above 0.';
+      case 'random': {
+        const after = Number(count);
+        const p = Number(percent);
+        if (!Number.isInteger(after) || after < 0) return 'From which message? A whole number, 0 or more.';
+        return p > 0 && p <= 100 ? { type: 'random', after_messages: after, chance: p / 100 } : 'Chance: a percent above 0, up to 100.';
+      }
       case 'secret_level':
         return Number.isInteger(Number(level)) && Number(level) > 1 ? { type: 'secret_level', level: Number(level) } : 'Which level? 2 or higher.';
       case 'timed_global': {
@@ -199,6 +207,18 @@ export function GateEditor({ gate, people, toast, onSaved, onCancel }: Props) {
       </select>
       {triggerType === 'after_messages' && (
         <input className="admin-input" inputMode="numeric" aria-label="After how many messages" value={count} onChange={(e) => setCount(e.target.value)} />
+      )}
+      {triggerType === 'random' && (
+        <>
+          <div className="gate-editor__row">
+            <input className="admin-input" inputMode="numeric" aria-label="From message number" value={count} onChange={(e) => setCount(e.target.value)} />
+            <input className="admin-input" inputMode="decimal" aria-label="Chance per message in percent" value={percent} onChange={(e) => setPercent(e.target.value)} />
+          </div>
+          <p className="admin-muted gate-editor__help">
+            From that message on, each message has this chance (in %). All random gates are rolled in turn, each guest gets each
+            one at most once, and nothing springs within 3 messages of their last gate.
+          </p>
+        </>
       )}
       {triggerType === 'secret_level' && (
         <input className="admin-input" inputMode="numeric" aria-label="Secrets-game level" value={level} onChange={(e) => setLevel(e.target.value)} />

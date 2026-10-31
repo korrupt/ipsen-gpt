@@ -284,6 +284,38 @@ describe('gate editor', () => {
     expect(screen.queryByRole('form', { name: 'New gate' })).toBeNull();
   });
 
+  it('sets a random trigger as a percent per message', async () => {
+    let defs: GateDefinition[] = [];
+    const fetch = loggedIn({
+      'GET /api/admin/gates': () => json({ definitions: defs, errors: [], active: [], missingShipped: [] }),
+      'POST /api/admin/gate-defs': (init) => {
+        const b = JSON.parse(init.body as string);
+        defs = [def({ key: `global/${b.id}`, id: b.id, target: b.target, trigger: b.trigger })];
+        return json({ definition: defs[0] });
+      },
+    });
+    render(<AdminApp />);
+    await userEvent.click(await screen.findByRole('button', { name: /^gates$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: 'New gate' }));
+    const form = screen.getByRole('form', { name: 'New gate' });
+    await userEvent.type(within(form).getByLabelText('What must be in the photo'), 'a broom');
+    await userEvent.type(within(form).getByLabelText(/what sadgpt says/i), 'Broom!');
+    await userEvent.selectOptions(within(form).getByLabelText('When'), 'random');
+    const from = within(form).getByLabelText('From message number');
+    await userEvent.clear(from);
+    await userEvent.type(from, '4');
+    const chance = within(form).getByLabelText('Chance per message in percent');
+    await userEvent.clear(chance);
+    await userEvent.type(chance, '0');
+    await userEvent.click(within(form).getByRole('button', { name: 'Create gate' }));
+    expect(within(form).getByRole('alert').textContent).toMatch(/percent above 0/);
+    await userEvent.clear(chance);
+    await userEvent.type(chance, '7.5');
+    await userEvent.click(within(form).getByRole('button', { name: 'Create gate' }));
+    expect(bodyOf(fetch, '/api/admin/gate-defs').trigger).toEqual({ type: 'random', after_messages: 4, chance: 0.075 });
+    expect((await screen.findByTestId('gate-definition')).textContent).toContain('at random: 7.5% per message from message 4');
+  });
+
   it('edits, resets, deletes and adds back gates, and shows server errors', async () => {
     let defs = [def({ shipped: 'changed' }), def({ key: 'global/candle', id: 'candle', target: 'a candle', shipped: 'same' })];
     let missing: GateDefinition[] = [];

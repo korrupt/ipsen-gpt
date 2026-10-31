@@ -10,7 +10,9 @@
     ],
     "points": 10,
     "trigger": {
-      "type": "admin_forced"
+      "type": "random",
+      "after_messages": 6,
+      "chance": 0.04
     }
   },
   {
@@ -20,7 +22,9 @@
     "refusal_lines": [],
     "points": 5,
     "trigger": {
-      "type": "admin_forced"
+      "type": "random",
+      "after_messages": 6,
+      "chance": 0.03
     }
   },
   {
@@ -33,7 +37,42 @@
     ],
     "points": 10,
     "trigger": {
-      "type": "admin_forced"
+      "type": "random",
+      "after_messages": 4,
+      "chance": 0.04
+    }
+  },
+  {
+    "id": "ghost-joke",
+    "kind": "text",
+    "target": "a joke about ghosts (an actual joke with a punchline, not just a statement about ghosts)",
+    "guest_prompt": "Tell me a joke about ghosts. Make me laugh. I dare you. Nobody has managed it since 2006.",
+    "refusal_lines": [
+      "That's not a joke. That's just sad. And I would know.",
+      "I didn't laugh. I didn't even sigh differently.",
+      "Try again. My standards are low, but not that low."
+    ],
+    "points": 5,
+    "trigger": {
+      "type": "random",
+      "after_messages": 3,
+      "chance": 0.04
+    }
+  },
+  {
+    "id": "compliment",
+    "kind": "text",
+    "target": "a sincere compliment for SadGPT",
+    "guest_prompt": "Nobody ever says anything nice to me. Say something nice about me. And mean it.",
+    "refusal_lines": [
+      "That wasn't nice. That was just words.",
+      "I can tell when you don't mean it. I can always tell."
+    ],
+    "points": 3,
+    "trigger": {
+      "type": "random",
+      "after_messages": 8,
+      "chance": 0.03
     }
   },
   {

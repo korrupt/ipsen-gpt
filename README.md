@@ -163,6 +163,7 @@ sends good, weak and cheating answers to a few text gates and reports how they w
 | `after_messages` | Right after the reply to the guest's `count`th message, so it shows up before they type again. |
 | `timed_global` | At `at` (ISO time **with timezone**, e.g. `2026-10-31T22:30:00+01:00`), for every guest, until `deadline_minutes` later. Then it expires; whoever didn't make it misses the points. |
 | `admin_forced` | Only when you force it in admin. |
+| `random` | From the guest's `after_messages`th message on, each message springs it with probability `chance` (0–1). All random gates form a pool, rolled in random order after each reply; each guest gets each gate at most once, and nothing springs within 3 messages of their last gate. The shipped pool gives a guest about 2 gates per 20 messages. |
 | `secret_level` | When a guest reaches secrets-game `level` (2 and up) by guessing the one before. |
 | `curse_break` | Reserved for curses (Phase 6). |
 

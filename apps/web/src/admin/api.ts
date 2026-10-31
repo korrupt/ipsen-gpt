@@ -162,6 +162,7 @@ export type GateTrigger =
   | { type: 'curse_break' }
   | { type: 'secret_level'; level: number }
   | { type: 'admin_forced' }
+  | { type: 'random'; after_messages: number; chance: number }
   | { type: 'timed_global'; at: string; deadline_minutes: number };
 
 export type GateKind = 'photo' | 'text';
@@ -199,7 +200,7 @@ export interface AdminGate {
   sessionId: string;
   sessionName: string | null;
   defKey: string | null;
-  source: 'session_start' | 'after_messages' | 'secret_level' | 'admin_forced' | 'timed_global';
+  source: 'session_start' | 'after_messages' | 'random' | 'secret_level' | 'admin_forced' | 'timed_global';
   kind: GateKind;
   target: string;
   guestPrompt: string;
@@ -378,6 +379,8 @@ export function triggerLabel(t: GateTrigger): string {
       return `before secret level ${t.level}`;
     case 'admin_forced':
       return 'only when forced';
+    case 'random':
+      return `at random: ${Math.round(t.chance * 1000) / 10}% per message from message ${t.after_messages}`;
     case 'timed_global': {
       const at = new Date(t.at).toLocaleString('nb-NO', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
       return `everyone at ${at}, ${t.deadline_minutes} min`;

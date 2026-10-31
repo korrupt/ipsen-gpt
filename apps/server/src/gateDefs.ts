@@ -14,6 +14,15 @@ const Trigger = z.discriminatedUnion('type', [
   z.object({ type: z.literal('secret_level'), level: z.number().int().positive() }),
   /** Only when the admin forces it. */
   z.object({ type: z.literal('admin_forced') }),
+  /**
+   * From the guest's `after_messages`th message on, each message springs this gate
+   * with probability `chance`. All random gates form a pool; see GateStore.afterReply.
+   */
+  z.object({
+    type: z.literal('random'),
+    after_messages: z.number().int().min(0),
+    chance: z.number().positive().max(1),
+  }),
   /** At `at`, for every live session, until `deadline_minutes` later. */
   z.object({
     type: z.literal('timed_global'),

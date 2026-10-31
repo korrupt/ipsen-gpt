@@ -3,7 +3,10 @@ import type { Db } from './db.js';
 import type { GateDef, GateDefSet, GateKind } from './gateDefs.js';
 
 export type GateStatus = 'active' | 'passed' | 'expired' | 'cancelled';
-export type GateSource = 'session_start' | 'after_messages' | 'secret_level' | 'admin_forced' | 'timed_global';
+export type GateSource = 'session_start' | 'after_messages' | 'random' | 'secret_level' | 'admin_forced' | 'timed_global';
+
+/** After a guest's gate ends, this many of their messages pass before a random gate can spring. */
+export const RANDOM_GATE_GAP = 3;
 
 export interface Gate {
   id: string;
@@ -123,6 +126,8 @@ export class GateStore {
     /** Current definitions (re-read from disk by the caller as it likes). */
     private readonly defs: () => GateDefSet,
     private readonly now: () => number = Date.now,
+    /** For random gates; tests pass their own. */
+    private readonly random: () => number = Math.random,
   ) {}
 
   // --- Lookup ---------------------------------------------------------------
@@ -183,17 +188,58 @@ export class GateStore {
   /**
    * Called right after a reply is stored. Fires the after_messages gates the
    * guest has now reached, so the gate shows up before they type again and no
-   * message of theirs is spent on it. Returns the gate that now blocks chat, if
-   * this call created it.
+   * message of theirs is spent on it. Failing that, maybe springs a random gate.
+   * Returns the gate that now blocks chat, if this call created it.
    */
   afterReply(subject: GateSubject, userMessagesSoFar: number): Gate | undefined {
     if (this.current(subject.id)) return undefined;
-    for (const def of this.defs().defs) {
+    const defs = this.defs().defs.filter((d) => d.personSlug === null || d.personSlug === subject.personSlug);
+    for (const def of defs) {
       if (def.trigger.type !== 'after_messages' || userMessagesSoFar < def.trigger.count) continue;
-      if (def.personSlug !== null && def.personSlug !== subject.personSlug) continue;
       this.give(subject.id, { def }, 'after_messages');
     }
+    if (!this.current(subject.id)) this.springRandom(subject.id, defs, userMessagesSoFar);
     return this.current(subject.id);
+  }
+
+  /**
+   * The random pool: gates this guest has never had and has sent enough messages
+   * for, rolled one by one in random order; the first hit springs. Nothing springs
+   * within RANDOM_GATE_GAP messages of the guest's last gate.
+   */
+  private springRandom(sessionId: string, defs: GateDef[], userMessagesSoFar: number): void {
+    const had = new Set(
+      (this.db.prepare('SELECT def_key FROM gates WHERE session_id = ? AND def_key IS NOT NULL').all(sessionId) as { def_key: string }[]).map(
+        (r) => r.def_key,
+      ),
+    );
+    const pool = defs.filter(
+      (d) => d.trigger.type === 'random' && userMessagesSoFar >= d.trigger.after_messages && !had.has(d.key),
+    );
+    if (pool.length === 0 || this.messagesSinceLastGate(sessionId) < RANDOM_GATE_GAP) return;
+    // Fisher-Yates, so no gate is always rolled first.
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(this.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+    }
+    for (const def of pool) {
+      if (def.trigger.type === 'random' && this.random() < def.trigger.chance) {
+        this.give(sessionId, { def }, 'random');
+        return;
+      }
+    }
+  }
+
+  /** The guest's messages since their last gate ended (Infinity if they never had one). */
+  private messagesSinceLastGate(sessionId: string): number {
+    const last = this.db
+      .prepare('SELECT MAX(COALESCE(resolved_at, created_at)) AS t FROM gates WHERE session_id = ?')
+      .get(sessionId) as { t: number | null };
+    if (last.t === null) return Infinity;
+    const r = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM messages WHERE session_id = ? AND role = 'user' AND created_at > ?`)
+      .get(sessionId, last.t) as { n: number };
+    return r.n;
   }
 
   /**
