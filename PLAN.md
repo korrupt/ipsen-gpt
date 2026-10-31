@@ -3,7 +3,7 @@
 A full-screen, mobile-first chat website for a Halloween costume. Guests scan a QR code, pick a name, and chat with an in-character AI called SadGPT, a sad emo chatbot (styled as a ChatGPT lookalike). Some guests are pre-registered with info I've written about them; they claim their identity by showing me a short code, which I approve in the admin dashboard. Sessions persist through the night (token in localStorage, state in SQLite).
 
 - **Character name:** SadGPT (rebranded from IpsenGPT on 2026-10-30; matches the costume tee)
-- **Character description / voice:** a sad emo chatbot. Several personas in `content/personas/`, switchable in admin (see Phase 5).
+- **Character description / voice:** an emo chatbot, more jaded than sad. Two personas in `content/personas/` (cut down on 2026-10-31), switchable in admin (see Phase 5). The shared rules make every persona nudge guests to drink (backing off at once if they say no), and while the secrets game is off, SadGPT teases that it starts at 9 pm.
 - **Domain:** chat.ipsen.no
 - **Photo gate targets:** TODO (defined in `gates.json`, plus per-person gates)
 

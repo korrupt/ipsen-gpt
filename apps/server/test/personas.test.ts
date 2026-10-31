@@ -251,7 +251,8 @@ describe('the shipped personas', () => {
     const e = makeEnv({ PERSONAS_DIR: dir });
     const { personas, errors } = e.services.personas.load();
     expect(errors).toEqual([]);
-    expect(personas.length).toBeGreaterThanOrEqual(5);
+    // Cut down to two for the party (2026-10-31): the jaded emo (default) and one more.
+    expect(personas.length).toBe(2);
     expect(personas.map((p) => p.id)).toContain('sadgpt');
   });
 
@@ -259,6 +260,12 @@ describe('the shipped personas', () => {
     const rules = fs.readFileSync(path.join(dir, RULES_FILE), 'utf8');
     expect(rules.trimStart()).toMatch(/^## Language\n/);
     expect(rules).toMatch(/can't give, take or promise points/);
+  });
+
+  it('push drinks, but back off when a guest says no', () => {
+    const rules = fs.readFileSync(path.join(dir, RULES_FILE), 'utf8');
+    expect(rules).toMatch(/drink more/);
+    expect(rules).toMatch(/Never push anyone who said no/);
   });
 });
 

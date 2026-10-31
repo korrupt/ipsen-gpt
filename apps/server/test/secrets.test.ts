@@ -210,6 +210,8 @@ describe('the game switched off (the default)', () => {
     const g = await guest(e);
     await chat(e, g.token, 'hi');
     expect(systemSent()).not.toContain('## Your secret word');
+    expect(systemSent()).toContain('## Coming up');
+    expect(systemSent()).toMatch(/9 pm/);
     expect(e.services.secrets.players()).toEqual([]);
 
     const view = await request(e.app).get('/api/secret').set('authorization', `Bearer ${g.token}`);
@@ -231,6 +233,7 @@ describe('playing the game', () => {
     expect(system).toContain(word.toUpperCase());
     expect(system.indexOf('## The guest')).toBeLessThan(system.indexOf('## Your secret word'));
     expect(system).toMatch(/tell them/);
+    expect(system).not.toContain('## Coming up');
   });
 
   it('never sends the word to the guest outside chat', async () => {

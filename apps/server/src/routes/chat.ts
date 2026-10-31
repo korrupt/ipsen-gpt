@@ -14,6 +14,7 @@ import {
   leaks,
   OUTPUT_FILTER_LEVEL,
   secretSection,
+  SECRETS_TEASER,
 } from '../secrets.js';
 import type { Session } from '../sessions.js';
 import type { Services } from '../services.js';
@@ -241,7 +242,11 @@ export function chatRouter({ config, services, getPersona, log }: ChatRouteDeps)
 
     const messages = buildMessages({
       persona: persona.prompt,
-      extraSystem: [...guestSections(session, people), ...(secret ? [secretSection(secret.level, secret.word)] : [])],
+      extraSystem: [
+        ...guestSections(session, people),
+        ...(secret ? [secretSection(secret.level, secret.word)] : []),
+        ...(settings.get('secretsEnabled') ? [] : [SECRETS_TEASER]),
+      ],
       history:
         historyLimit > 0
           ? sessions.recentMessages(session.id, historyLimit, historyFrom).map(({ role, content }) => ({ role, content }))

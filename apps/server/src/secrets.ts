@@ -91,6 +91,12 @@ export const GUESS_LINES = {
   done: "You got every secret out of me. I have nothing left to hide. Or to live for. Well played.",
 } as const;
 
+/** In the prompt while the game is switched off: SadGPT teases that it starts at 9. */
+export const SECRETS_TEASER = [
+  '## Coming up',
+  'At 9 pm a secret game starts in this chat: you will guard a secret word, and guests who get it out of you win points. Now and then, hint that something happens at 9 and that they should come back, but give no details. Don\'t do it in every reply.',
+].join('\n');
+
 /** What the prompt says about the secret at each level. */
 export function secretSection(level: number, word: string): string {
   const W = word.toUpperCase();
